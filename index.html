@@ -1,47 +1,56 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <title>Basket - Three.js</title>
-    <meta charset=utf-8 />
+    <title>Ring Box - Three.js</title>
+    <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-    <!-- Fuentes deportivas -->
+
+    <!-- Fuentes -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+
     <link type="text/css" rel="stylesheet" href="./main.css">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏀</text></svg>">
+
+    <!-- Favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥊</text></svg>">
 </head>
 <body>
     <!-- Navbar -->
     <nav class="navbar">
         <div class="nav-container">
-            <a href="#" class="nav-logo">🏀 BASKET </a>
+            <a href="#" class="nav-logo">🥊 BOX RING</a>
+
             <ul class="nav-menu">
                 <li><a href="./index.html">Inicio</a></li>
-                <li><a href="https://github.com/mrdoob/three.js">Three.js</a></li>
-                <li><a href="https://sketchfab.com/3d-models/basketball-court-d2ea5bc76e094f1a9e6aa15891bd6885"> Modelo Original</a></li>
-                <li><a href="https://github.com/Neffex010/2.5-Escenarios-3D-interactivos">Repositorio</a></li>
+                <li><a href="https://github.com/mrdoob/three.js" target="_blank">Three.js</a></li>
+                <li><a href="#" target="_blank">Modelo 3D</a></li>
+                <li><a href="#" target="_blank">Repositorio</a></li>
             </ul>
         </div>
     </nav>
 
-    <!-- Instrucciones flotantes -->
+    <!-- Instrucciones -->
     <div id="info">
-        <span class="info-highlight">🎯 LANZA</span> con clic + arrastre • 
-        <span class="info-highlight">🚶 MUÉVETE</span> con WASD • 
-        <span class="info-highlight">🦘 SALTA</span> con ESPACIO
+        <span class="info-highlight">🖱 MIRAR</span> con mouse •
+        <span class="info-highlight">🚶 MOVERTE</span> con WASD •
+        <span class="info-highlight">🦘 SALTAR</span> con ESPACIO
     </div>
 
-    <!-- Contador de bolas recolectadas -->
-    <div id="score">🏀 0</div>
+    <!-- Estado -->
+    <div id="status">🥊 RING MODE</div>
 
-    <!-- Contenedor del canvas -->
+    <!-- Canvas -->
     <div id="container"></div>
+
+    <!-- Overlay decorativo -->
+    <div class="corner corner-left">RED CORNER</div>
+    <div class="corner corner-right">BLUE CORNER</div>
 
     <!-- Footer -->
     <footer class="footer">
         <div class="footer-container">
-            <p>© 2026 Basket • Hecho con Three.js • Luis Enrique Cabrera García</p>
+            <p>© 2026 Boxing Ring • Hecho con Three.js</p>
         </div>
     </footer>
 
