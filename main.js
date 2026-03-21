@@ -639,7 +639,7 @@ async function loadBoxer() {
 async function createPunchingBag(x, z) {
     return new Promise((resolve, reject) => {
         gltfLoader.load(
-            'costal.glb',
+            'poly.glb',
             (gltf) => {
                 const bag = gltf.scene;
 
