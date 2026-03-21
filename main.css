@@ -7,7 +7,7 @@
 
 html, body {
     margin: 0;
-    overflow: hidden;
+    overflow: hidden; /* Evita scrollbars al jugar */
     font-family: 'Roboto', sans-serif;
     background: #0b0b0f;
     color: white;
@@ -38,7 +38,7 @@ body {
 
 .nav-container {
     max-width: 1300px;
-    height: 68px;
+    height: 60px;
     margin: 0 auto;
     padding: 0 22px;
     display: flex;
@@ -81,56 +81,34 @@ body {
 }
 
 /* =========================
-   INSTRUCCIONES
+   INSTRUCCIONES (Reubicadas abajo)
 ========================= */
 #info {
-    position: absolute;
-    top: 84px;
+    position: fixed;
+    bottom: 45px; /* Arriba del footer */
     left: 50%;
     transform: translateX(-50%);
     z-index: 500;
     pointer-events: none;
-    background: rgba(10, 10, 10, 0.75);
+    background: rgba(10, 10, 10, 0.85);
     color: #fff;
-    padding: 9px 18px;
+    padding: 10px 22px;
     border-radius: 999px;
     border: 2px solid rgba(230, 193, 90, 0.85);
     box-shadow:
         0 0 18px rgba(139, 0, 0, 0.35),
         0 0 10px rgba(230, 193, 90, 0.18);
-    backdrop-filter: blur(6px);
+    backdrop-filter: blur(8px);
     font-family: 'Bebas Neue', cursive;
     font-size: 1.15rem;
     letter-spacing: 1px;
     white-space: nowrap;
+    text-align: center;
 }
 
 .info-highlight {
     color: #e6c15a;
     font-weight: bold;
-}
-
-/* =========================
-   ESTADO / MARCADOR
-========================= */
-#status {
-    position: absolute;
-    top: 132px;
-    left: 20px;
-    z-index: 600;
-    pointer-events: none;
-    background: linear-gradient(135deg, rgba(139, 0, 0, 0.92), rgba(35, 35, 35, 0.92));
-    color: #fff;
-    border: 2px solid #e6c15a;
-    border-radius: 18px;
-    padding: 10px 18px;
-    font-family: 'Bebas Neue', cursive;
-    font-size: 1.4rem;
-    letter-spacing: 2px;
-    box-shadow:
-        0 0 16px rgba(0,0,0,0.45),
-        0 0 12px rgba(230, 193, 90, 0.2);
-    text-shadow: 2px 2px 0 #000;
 }
 
 /* =========================
@@ -149,7 +127,7 @@ body {
 ========================= */
 .corner {
     position: fixed;
-    bottom: 58px;
+    bottom: 95px; /* Más arriba para no tapar instrucciones */
     z-index: 450;
     padding: 8px 14px;
     border-radius: 999px;
@@ -182,16 +160,15 @@ body {
     left: 0;
     bottom: 0;
     width: 100%;
-    z-index: 500;
+    z-index: 1000;
     text-align: center;
-    padding: 8px 0;
-    background: rgba(8, 8, 12, 0.88);
+    padding: 6px 0;
+    background: rgba(8, 8, 12, 0.95);
     border-top: 2px solid #e6c15a;
-    backdrop-filter: blur(5px);
     color: #d8d8d8;
     font-family: 'Bebas Neue', cursive;
-    letter-spacing: 1px;
-    font-size: 0.9rem;
+    letter-spacing: 1.2px;
+    font-size: 0.95rem;
 }
 
 .footer-container p {
@@ -199,7 +176,7 @@ body {
 }
 
 /* =========================
-   LIL GUI
+   LIL GUI (Menú de Ajustes 3D)
 ========================= */
 .lil-gui {
     --background-color: rgba(20, 20, 25, 0.92);
@@ -210,12 +187,15 @@ body {
     --hover-color: #2c2c38;
     --focus-color: #e6c15a;
     z-index: 1200 !important;
-    margin-top: 74px;
-    margin-right: 8px;
+    margin-top: 75px !important; /* Debajo de la navbar */
+    margin-right: 15px !important;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
 }
 
 /* =========================
-   RESPONSIVE
+   RESPONSIVE (Pantallas Pequeñas)
 ========================= */
 @media (max-width: 900px) {
     .nav-menu {
@@ -231,24 +211,19 @@ body {
     }
 
     #info {
-        width: calc(100% - 24px);
-        white-space: normal;
-        text-align: center;
-        font-size: 0.95rem;
+        width: 90%;
+        white-space: normal; /* Permite que el texto baje a dos líneas */
+        font-size: 1rem;
+        bottom: 40px;
         padding: 8px 12px;
-    }
-
-    #status {
-        top: 155px;
-        font-size: 1.15rem;
-        padding: 8px 14px;
+        line-height: 1.6;
     }
 }
 
 @media (max-width: 700px) {
     .nav-container {
         height: auto;
-        padding: 10px 14px;
+        padding: 8px 14px;
         flex-direction: column;
         gap: 8px;
     }
@@ -259,24 +234,15 @@ body {
         gap: 10px 16px;
     }
 
-    #info {
-        top: 108px;
-    }
-
-    #status {
-        top: 175px;
-        left: 12px;
-    }
-
     .corner {
-        display: none;
+        display: none; /* Ocultamos las esquinas en móviles para ganar espacio */
     }
 
     .footer {
-        font-size: 0.78rem;
+        font-size: 0.8rem;
     }
-
+    
     .lil-gui {
-        margin-top: 120px;
+        margin-top: 100px !important;
     }
 }
