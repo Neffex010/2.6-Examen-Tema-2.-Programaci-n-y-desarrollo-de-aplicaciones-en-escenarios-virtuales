@@ -14,6 +14,33 @@ const timer = new THREE.Timer();
 timer.connect(document);
 
 // =========================
+// CONFIGURACIÓN MAESTRA DEL JUEGO
+// =========================
+const GAME_CONFIG = {
+    physics: {
+        gravity: 30,
+        maxSpeed: 10.5,
+        stepsPerFrame: 5
+    },
+    movement: {
+        walkSpeed: 12,
+        runSpeed: 19,
+        airWalkSpeed: 5,
+        airRunSpeed: 7,
+        jumpForce: 9.5,
+        turnSpeed: 12 
+    },
+    camera: {
+        followSpeed: 12 
+    },
+    round: {
+        duration: 60
+    }
+};
+
+const STEPS_PER_FRAME = GAME_CONFIG.physics.stepsPerFrame;
+
+// =========================
 // ESCENA
 // =========================
 const scene = new THREE.Scene();
@@ -152,14 +179,6 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 // =========================
-// PARÁMETROS GLOBALES
-// =========================
-const GRAVITY = 30;
-const STEPS_PER_FRAME = 5;
-const MAX_PLAYER_SPEED = 10.5;
-const ROUND_DURATION = 60;
-
-// =========================
 // PARÁMETROS AJUSTABLES
 // =========================
 const params = {
@@ -219,7 +238,6 @@ const boxerActions = {};
 let activeAction = null;
 
 let boxerOffsetY = 0;
-const boxerTurnSpeed = 10;
 const boxerVisualHeight = 1.45;
 const boxerGroundAdjust = -0.35;
 
@@ -255,7 +273,7 @@ const tempCenter = new THREE.Vector3();
 let score = 0;
 let combo = 0;
 let health = 100;
-let timeLeft = ROUND_DURATION;
+let timeLeft = GAME_CONFIG.round.duration;
 let roundEnded = false;
 let comboTimer = 0;
 
@@ -343,7 +361,6 @@ document.addEventListener('keydown', (event) => {
 
     keyStates[event.code] = true;
 
-    // Control de cámara por teclado (Zoom)
     if (event.code === 'ArrowUp') {
         params.cameraDistance = Math.max(1.5, params.cameraDistance - 0.5);
         gui.controllersRecursive().forEach(c => c.updateDisplay());
@@ -353,12 +370,11 @@ document.addEventListener('keydown', (event) => {
         gui.controllersRecursive().forEach(c => c.updateDisplay());
     }
 
-    // Reiniciar partida
     if (event.code === 'KeyR' && roundEnded) {
         score = 0;
         combo = 0;
         health = 100;
-        timeLeft = ROUND_DURATION;
+        timeLeft = GAME_CONFIG.round.duration;
         roundEnded = false;
         
         setPlayerSpawn();
@@ -479,14 +495,13 @@ function updateBoxerTransform(deltaTime) {
         boxer.rotation.y = THREE.MathUtils.lerp(
             boxer.rotation.y,
             targetAngle,
-            Math.min(1, boxerTurnSpeed * deltaTime)
+            Math.min(1, GAME_CONFIG.movement.turnSpeed * deltaTime)
         );
     } else {
-        // Mejorada la fluidez de giro del personaje (de 6 a 12)
         boxer.rotation.y = THREE.MathUtils.lerp(
             boxer.rotation.y,
             yaw,
-            Math.min(1, 12 * deltaTime)
+            Math.min(1, GAME_CONFIG.movement.turnSpeed * deltaTime)
         );
     }
 }
@@ -563,10 +578,7 @@ function processAttackHits(cfg, hitTargets) {
     for (const target of targetObjects) {
         if (hitTargets.has(target.id)) continue;
 
-        // Vector hacia el objetivo
         const toTarget = vector4.copy(target.position).sub(playerCenter);
-        
-        // ¡LA CLAVE ESTÁ AQUÍ! Ignoramos la diferencia de altura
         toTarget.y = 0; 
         const dist = toTarget.length();
         
@@ -575,17 +587,16 @@ function processAttackHits(cfg, hitTargets) {
         if (dist > 0.0001) {
             toTarget.normalize();
             const dot = toTarget.dot(attackForward);
-            if (dot < 0.15) continue; // Ángulo de visión
+            if (dot < 0.15) continue;
         }
 
-        /// Medir distancia del impacto al cuadrado
+        // Colisión optimizada matemáticamente
         const dx = target.position.x - attackPoint.x;
         const dz = target.position.z - attackPoint.z;
         const hitDistSq = (dx * dx) + (dz * dz);
         
         const strikeRadius = cfg.radius + target.radius;
 
-      // Comparamos sin usar raíz cuadrada
         if (hitDistSq <= (strikeRadius * strikeRadius)) {
             hitTargets.add(target.id);
 
@@ -693,7 +704,6 @@ async function createPunchingBag(x, z) {
 
                 bagGroup.add(pivot);
 
-                // Aumentamos ligeramente el radio para detectar mejor la colisión del jugador
                 const radius = Math.max(0.45, Math.max(size.x, size.z) * 0.45);
 
                 const target = {
@@ -778,8 +788,9 @@ function controls(deltaTime) {
     if (roundEnded) return;
 
     const running = keyStates['ShiftLeft'];
-    const baseSpeed = running ? 19 : 12;
-    const airSpeed = running ? 7 : 5;
+    
+    const baseSpeed = running ? GAME_CONFIG.movement.runSpeed : GAME_CONFIG.movement.walkSpeed;
+    const airSpeed = running ? GAME_CONFIG.movement.airRunSpeed : GAME_CONFIG.movement.airWalkSpeed;
     const speedDelta = deltaTime * (playerOnFloor ? baseSpeed : airSpeed);
 
     if (keyStates['KeyW']) {
@@ -799,7 +810,7 @@ function controls(deltaTime) {
     }
 
     if (playerOnFloor && keyStates['Space']) {
-        playerVelocity.y = 9.5;
+        playerVelocity.y = GAME_CONFIG.movement.jumpForce;
     }
 }
 
@@ -821,8 +832,7 @@ function updateThirdPersonCamera(deltaTime) {
 
     desiredCameraPos.y += params.cameraHeight;
 
-    // Mejorada la fluidez de seguimiento de la cámara (de 6 a 12)
-    camera.position.lerp(desiredCameraPos, Math.min(1, 12 * deltaTime));
+    camera.position.lerp(desiredCameraPos, Math.min(1, GAME_CONFIG.camera.followSpeed * deltaTime));
 
     cameraTarget.copy(headPosition);
     cameraTarget.y += 0.25;
@@ -837,14 +847,14 @@ function updatePlayer(deltaTime) {
     let damping = Math.exp(-4 * deltaTime) - 1;
 
     if (!playerOnFloor) {
-        playerVelocity.y -= GRAVITY * deltaTime;
+        playerVelocity.y -= GAME_CONFIG.physics.gravity * deltaTime;
         damping *= 0.15;
     }
 
     playerVelocity.addScaledVector(playerVelocity, damping);
 
-    if (playerVelocity.length() > MAX_PLAYER_SPEED) {
-        playerVelocity.normalize().multiplyScalar(MAX_PLAYER_SPEED);
+    if (playerVelocity.length() > GAME_CONFIG.physics.maxSpeed) {
+        playerVelocity.normalize().multiplyScalar(GAME_CONFIG.physics.maxSpeed);
     }
 
     const deltaPosition = vector3.copy(playerVelocity).multiplyScalar(deltaTime);
@@ -852,21 +862,18 @@ function updatePlayer(deltaTime) {
 
     playerCollisions();
 
- // --- COLISIÓN MATEMÁTICA CON EL COSTAL (OPTIMIZADA) ---
+    // --- COLISIÓN MATEMÁTICA CON EL COSTAL OPTIMIZADA ---
     const px = (playerCollider.start.x + playerCollider.end.x) * 0.5;
     const pz = (playerCollider.start.z + playerCollider.end.z) * 0.5;
 
     for (const target of targetObjects) {
         const dx = px - target.position.x;
         const dz = pz - target.position.z;
-        
-        // Calculamos la distancia al cuadrado (sin raíz)
         const distSq = (dx * dx) + (dz * dz);
+        
         const minDist = target.radius + PLAYER_RADIUS + 0.15; 
         
-        // Comparamos contra la distancia mínima al cuadrado
         if (distSq < (minDist * minDist) && distSq > 0.0001) {
-            // SOLO calculamos la raíz cuadrada si ya confirmamos que chocaron
             const dist = Math.sqrt(distSq); 
             const overlap = minDist - dist;
             const pushX = (dx / dist) * overlap;
@@ -875,8 +882,6 @@ function updatePlayer(deltaTime) {
             playerCollider.translate(new THREE.Vector3(pushX, 0, pushZ));
         }
     }
-    // -------------------------------------------------------------
- 
 
     keepPlayerInsideBounds();
     updateThirdPersonCamera(deltaTime);
