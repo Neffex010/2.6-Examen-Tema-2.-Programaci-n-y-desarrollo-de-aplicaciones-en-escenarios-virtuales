@@ -279,8 +279,9 @@ let comboTimer = 0;
 
 let attackState = null;
 const ATTACK_CONFIG = {
-    jab:  { duration: 0.34, activeStart: 0.10, activeEnd: 0.22, range: 1.5, radius: 0.9, score: 20, impulse: 5.5 },
-    hook: { duration: 0.46, activeStart: 0.14, activeEnd: 0.30, range: 1.7, radius: 1.15, score: 30, impulse: 7.5 }
+    // Animaciones más largas para evitar cortes bruscos
+    jab:  { duration: 0.85, activeStart: 0.15, activeEnd: 0.35, range: 1.5, radius: 0.9, score: 20, impulse: 5.5 },
+    hook: { duration: 1.10, activeStart: 0.25, activeEnd: 0.50, range: 1.7, radius: 1.15, score: 30, impulse: 7.5 }
 };
 
 // =========================
@@ -350,17 +351,19 @@ gui.add(params, 'showOctree').name('Mostrar octree').onChange((value) => {
 // =========================
 document.addEventListener('keydown', (event) => {
     if ([
-        'Space',
-        'KeyW', 'KeyA', 'KeyS', 'KeyD',
-        'KeyJ', 'KeyK', 'KeyB',
-        'ShiftLeft',
+        'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD',
+        'KeyJ', 'KeyK', 'KeyB', 'ShiftLeft',
         'ArrowUp', 'ArrowDown'
     ].includes(event.code)) {
         event.preventDefault();
     }
 
+    // Prevenir spam de teclado (Auto-repeat)
+    if (event.repeat) return; 
+
     keyStates[event.code] = true;
 
+    // Control de cámara por teclado (Zoom)
     if (event.code === 'ArrowUp') {
         params.cameraDistance = Math.max(1.5, params.cameraDistance - 0.5);
         gui.controllersRecursive().forEach(c => c.updateDisplay());
@@ -370,6 +373,7 @@ document.addEventListener('keydown', (event) => {
         gui.controllersRecursive().forEach(c => c.updateDisplay());
     }
 
+    // Reiniciar partida
     if (event.code === 'KeyR' && roundEnded) {
         score = 0;
         combo = 0;
@@ -387,16 +391,15 @@ document.addEventListener('keydown', (event) => {
 
     if (!worldReady || roundEnded) return;
 
+    // Bloqueo activo (Ignorar intentos de ataque)
+    if (keyStates['KeyB']) return;
+
     if (event.code === 'KeyJ') {
         startAttack('jab');
     }
 
     if (event.code === 'KeyK') {
         startAttack('hook');
-    }
-
-    if (event.code === 'KeyB') {
-        playOneShot('block');
     }
 });
 
@@ -438,7 +441,7 @@ function getSideVector() {
 }
 
 // =========================
-// ANIMACIONES
+// ANIMACIONES Y ESTADOS
 // =========================
 function fadeToAction(name, duration = 0.2) {
     const nextAction = boxerActions[name];
@@ -506,25 +509,33 @@ function updateBoxerTransform(deltaTime) {
     }
 }
 
+// Máquina de estados pulida
 function updateAnimationState() {
     if (!boxerMixer) return;
+    
+    // Prioridad 1: Ataques
     if (attackState) return;
 
+    // Prioridad 2: Bloqueo sostenido
+    if (keyStates['KeyB'] && playerOnFloor) {
+        fadeToAction('block', 0.2);
+        return; 
+    }
+
+    // Prioridad 3: Movimiento
     const horizontalSpeed = Math.sqrt(
         playerVelocity.x * playerVelocity.x +
         playerVelocity.z * playerVelocity.z
     );
-
-    if (boxerActions.block?.isRunning()) return;
 
     if (!playerOnFloor) {
         fadeToAction('Idle', 0.12);
         return;
     }
 
-    if (horizontalSpeed > 4.8 && boxerActions.run) {
+    if (horizontalSpeed > 4.8 && keyStates['ShiftLeft']) {
         fadeToAction('run', 0.15);
-    } else if (horizontalSpeed > 0.15 && boxerActions.walk) {
+    } else if (horizontalSpeed > 0.15) {
         fadeToAction('walk', 0.18);
     } else {
         fadeToAction('Idle', 0.2);
@@ -532,7 +543,7 @@ function updateAnimationState() {
 }
 
 // =========================
-// ATAQUES
+// ATAQUES Y COLISIONES DE GOLPE
 // =========================
 function startAttack(name) {
     if (attackState || !ATTACK_CONFIG[name]) return;
@@ -579,7 +590,7 @@ function processAttackHits(cfg, hitTargets) {
         if (hitTargets.has(target.id)) continue;
 
         const toTarget = vector4.copy(target.position).sub(playerCenter);
-        toTarget.y = 0; 
+        toTarget.y = 0; // Ignorar la altura para impacto
         const dist = toTarget.length();
         
         if (dist > cfg.range + cfg.radius) continue;
@@ -590,7 +601,7 @@ function processAttackHits(cfg, hitTargets) {
             if (dot < 0.15) continue;
         }
 
-        // Colisión optimizada matemáticamente
+        // Colisión optimizada matemáticamente al cuadrado
         const dx = target.position.x - attackPoint.x;
         const dz = target.position.z - attackPoint.z;
         const hitDistSq = (dx * dx) + (dz * dz);
@@ -782,14 +793,16 @@ function playerCollisions() {
 }
 
 // =========================
-// CONTROLES DE MOVIMIENTO
+// CONTROLES DE MOVIMIENTO FÍSICO
 // =========================
 function controls(deltaTime) {
     if (roundEnded) return;
 
-    const running = keyStates['ShiftLeft'];
+    const isBlocking = keyStates['KeyB'];
+    const running = keyStates['ShiftLeft'] && !isBlocking;
     
-    const baseSpeed = running ? GAME_CONFIG.movement.runSpeed : GAME_CONFIG.movement.walkSpeed;
+    // Penalización de velocidad al estar en guardia (bloqueando)
+    const baseSpeed = running ? GAME_CONFIG.movement.runSpeed : (isBlocking ? 4 : GAME_CONFIG.movement.walkSpeed);
     const airSpeed = running ? GAME_CONFIG.movement.airRunSpeed : GAME_CONFIG.movement.airWalkSpeed;
     const speedDelta = deltaTime * (playerOnFloor ? baseSpeed : airSpeed);
 
@@ -809,7 +822,8 @@ function controls(deltaTime) {
         playerVelocity.add(getSideVector().multiplyScalar(speedDelta));
     }
 
-    if (playerOnFloor && keyStates['Space']) {
+    // No se puede saltar si tienes la guardia arriba
+    if (playerOnFloor && keyStates['Space'] && !isBlocking) {
         playerVelocity.y = GAME_CONFIG.movement.jumpForce;
     }
 }
