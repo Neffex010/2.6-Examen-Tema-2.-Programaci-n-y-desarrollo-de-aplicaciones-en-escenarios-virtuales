@@ -241,7 +241,6 @@ let boxerOffsetY = 0;
 const boxerVisualHeight = 1.45;
 const boxerGroundAdjust = -0.35;
 
-// Nuevo estado para la celebración
 let isVictorious = false;
 
 // =========================
@@ -271,7 +270,7 @@ const tempSize = new THREE.Vector3();
 const tempCenter = new THREE.Vector3();
 
 // =========================
-// JUEGO
+// JUEGO Y COMBATE
 // =========================
 let score = 0;
 let combo = 0;
@@ -282,12 +281,11 @@ let comboTimer = 0;
 
 let attackState = null;
 
-// --- DICCIONARIO DE ATAQUES ACTUALIZADO ---
 const ATTACK_CONFIG = {
     jab:      { duration: 0.85, activeStart: 0.15, activeEnd: 0.35, range: 1.5, radius: 0.90, score: 20, impulse: 5.5 },
-    hook:     { duration: 1.10, activeStart: 0.25, activeEnd: 0.50, range: 1.7, radius: 1.15, score: 30, impulse: 7.5 },
-    uppercut: { duration: 1.20, activeStart: 0.30, activeEnd: 0.55, range: 1.3, radius: 1.00, score: 40, impulse: 12.0 },
-    cross:    { duration: 0.95, activeStart: 0.20, activeEnd: 0.45, range: 1.9, radius: 0.95, score: 25, impulse: 6.5 }
+    hook:     { duration: 1.10, activeStart: 0.25, activeEnd: 0.50, range: 1.7, radius: 1.15, score: 30, impulse: 9.5 },
+    uppercut: { duration: 1.20, activeStart: 0.30, activeEnd: 0.55, range: 1.3, radius: 1.00, score: 40, impulse: 14.0 },
+    cross:    { duration: 0.95, activeStart: 0.20, activeEnd: 0.45, range: 1.9, radius: 0.95, score: 25, impulse: 7.5 }
 };
 
 // =========================
@@ -321,46 +319,29 @@ function hideMessage() {
     messageElement.style.display = 'none';
 }
 
-updateHud();
-
 // =========================
 // GUI
 // =========================
 const gui = new GUI({ width: 280 });
 gui.title('Box Ring');
-
-gui.add(params, 'exposure', 0.4, 2.0, 0.01).name('Exposición').onChange((v) => {
-    renderer.toneMappingExposure = v;
-});
-
+gui.add(params, 'exposure', 0.4, 2.0, 0.01).name('Exposición').onChange((v) => renderer.toneMappingExposure = v);
 gui.add(directionalLight, 'intensity', 0, 5, 0.1).name('Luz Principal');
 gui.add(hemiLight, 'intensity', 0, 3, 0.1).name('Luz Ambiental');
-
-gui.add(params, 'fogNear', 1, 30, 1).name('Niebla inicio').onChange((v) => {
-    scene.fog.near = v;
-});
-
-gui.add(params, 'fogFar', 20, 160, 1).name('Niebla fin').onChange((v) => {
-    scene.fog.far = v;
-});
-
+gui.add(params, 'fogNear', 1, 30, 1).name('Niebla inicio').onChange((v) => scene.fog.near = v);
+gui.add(params, 'fogFar', 20, 160, 1).name('Niebla fin').onChange((v) => scene.fog.far = v);
 gui.add(params, 'cameraDistance', 2.5, 8.0, 0.1).name('Distancia cámara');
 gui.add(params, 'cameraHeight', 0.6, 3.5, 0.1).name('Altura cámara');
-gui.add(params, 'bagScale', 0.3, 2.0, 0.05).name('Escala costal');
-
-gui.add(params, 'showOctree').name('Mostrar octree').onChange((value) => {
-    if (octreeHelper) octreeHelper.visible = value;
-});
+gui.add(params, 'showOctree').name('Mostrar octree').onChange((value) => { if (octreeHelper) octreeHelper.visible = value; });
 
 // =========================
-// EVENTOS
+// EVENTOS DE TECLADO Y MOUSE (ACTUALIZADOS PARA ERGONOMÍA)
 // =========================
 document.addEventListener('keydown', (event) => {
+    // Lista de teclas permitidas (WASD, Q, E, F, Espacio, Shift, R, Flechas)
     if ([
         'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD',
-        'KeyJ', 'KeyK', 'KeyB', 'ShiftLeft',
-        'KeyU', 'KeyI', 'KeyE', 'KeyH', // Nuevas teclas
-        'ArrowUp', 'ArrowDown'
+        'KeyQ', 'KeyE', 'KeyF', 'ShiftLeft',
+        'ArrowUp', 'ArrowDown', 'KeyR'
     ].includes(event.code)) {
         event.preventDefault();
     }
@@ -369,15 +350,11 @@ document.addEventListener('keydown', (event) => {
 
     keyStates[event.code] = true;
 
-    if (event.code === 'ArrowUp') {
-        params.cameraDistance = Math.max(1.5, params.cameraDistance - 0.5);
-        gui.controllersRecursive().forEach(c => c.updateDisplay());
-    }
-    if (event.code === 'ArrowDown') {
-        params.cameraDistance = Math.min(8.0, params.cameraDistance + 0.5);
-        gui.controllersRecursive().forEach(c => c.updateDisplay());
-    }
+    // Controles de Cámara (Flechas)
+    if (event.code === 'ArrowUp') { params.cameraDistance = Math.max(1.5, params.cameraDistance - 0.5); gui.controllersRecursive().forEach(c => c.updateDisplay()); }
+    if (event.code === 'ArrowDown') { params.cameraDistance = Math.min(8.0, params.cameraDistance + 0.5); gui.controllersRecursive().forEach(c => c.updateDisplay()); }
 
+    // Reiniciar
     if (event.code === 'KeyR' && roundEnded) {
         score = 0;
         combo = 0;
@@ -397,28 +374,40 @@ document.addEventListener('keydown', (event) => {
 
     if (!worldReady || roundEnded) return;
 
-    // --- BLOQUEO TÁCTICO ---
-    // No atacar si estamos bloqueando, recibiendo daño o esquivando
-    if (keyStates['KeyB'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
+    // --- BLOQUEO TÁCTICO (Ahora con la Barra Espaciadora) ---
+    if (keyStates['Space'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
-    // --- ATAQUES Y DEFENSAS ---
-    if (event.code === 'KeyJ') startAttack('jab');
-    if (event.code === 'KeyK') startAttack('hook');
-    if (event.code === 'KeyU') startAttack('uppercut');
-    if (event.code === 'KeyI') startAttack('cross');
+    // --- ATAQUES ESPECIALES CERCA DE WASD ---
+    if (event.code === 'KeyF') startAttack('hook');      // Gancho con el Índice
+    if (event.code === 'KeyQ') startAttack('uppercut');  // Uppercut con el Anular
     
-    if (event.code === 'KeyE') triggerDodge();
-    if (event.code === 'KeyH') triggerReaction(); // Tecla de prueba para el daño
+    // --- ESQUIVAR ---
+    if (event.code === 'KeyE') triggerDodge();           // Esquivar con el Índice
 });
 
 document.addEventListener('keyup', (event) => {
     keyStates[event.code] = false;
 });
 
-container.addEventListener('click', () => {
-    if (!roundEnded) {
-        container.requestPointerLock();
+// --- ATAQUES POR CLIC DE MOUSE ---
+document.addEventListener('mousedown', (event) => {
+    if (!pointerLocked || !worldReady || roundEnded) return;
+    
+    // No golpear si estamos bloqueando (Space), recibiendo daño o esquivando
+    if (keyStates['Space'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
+
+    if (event.button === 0) {
+        startAttack('jab'); // Clic Izquierdo (Jab)
+    } else if (event.button === 2) {
+        startAttack('cross'); // Clic Derecho (Cross)
     }
+});
+
+// Evitar menú contextual al dar clic derecho
+document.addEventListener('contextmenu', (event) => event.preventDefault());
+
+container.addEventListener('click', () => {
+    if (!roundEnded) container.requestPointerLock();
 });
 
 document.addEventListener('pointerlockchange', () => {
@@ -435,18 +424,8 @@ document.addEventListener('mousemove', (event) => {
     pitch = Math.max(-limit, Math.min(limit, pitch));
 });
 
-// =========================
-// DIRECCIÓN DE MOVIMIENTO
-// =========================
-function getForwardVector() {
-    forwardVector.set(Math.sin(yaw), 0, Math.cos(yaw)).normalize();
-    return forwardVector;
-}
-
-function getSideVector() {
-    sideVector.set(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
-    return sideVector;
-}
+function getForwardVector() { forwardVector.set(Math.sin(yaw), 0, Math.cos(yaw)).normalize(); return forwardVector; }
+function getSideVector() { sideVector.set(Math.cos(yaw), 0, -Math.sin(yaw)).normalize(); return sideVector; }
 
 // =========================
 // ANIMACIONES Y ESTADOS
@@ -454,18 +433,10 @@ function getSideVector() {
 function fadeToAction(name, duration = 0.2) {
     const nextAction = boxerActions[name];
     if (!nextAction || activeAction === nextAction) return;
-
     const previousAction = activeAction;
     activeAction = nextAction;
-
     if (previousAction) previousAction.fadeOut(duration);
-
-    activeAction
-        .reset()
-        .setEffectiveTimeScale(1)
-        .setEffectiveWeight(1)
-        .fadeIn(duration)
-        .play();
+    activeAction.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).fadeIn(duration).play();
 }
 
 function playOneShot(name, fadeIn = 0.08, fadeOut = 0.18) {
@@ -482,13 +453,13 @@ function playOneShot(name, fadeIn = 0.08, fadeOut = 0.18) {
     const onFinished = (e) => {
         if (e.action !== action) return;
         boxerMixer.removeEventListener('finished', onFinished);
-        // Regresa a Idle solo si no está en otra animación importante
         if (!attackState && !isVictorious) fadeToAction('Idle', fadeOut);
     };
 
     boxerMixer.addEventListener('finished', onFinished);
 }
 
+// MOVIMIENTO DE ROTACIÓN TIPO PELEA (Siempre mira al objetivo)
 function updateBoxerTransform(deltaTime) {
     if (!boxer) return;
 
@@ -498,47 +469,25 @@ function updateBoxerTransform(deltaTime) {
 
     boxer.position.set(centerX, centerY + boxerOffsetY, centerZ);
 
-    const moveX = playerVelocity.x;
-    const moveZ = playerVelocity.z;
-    const speedSq = moveX * moveX + moveZ * moveZ;
-
-    if (speedSq > 0.0004) {
-        const targetAngle = Math.atan2(moveX, moveZ);
-        boxer.rotation.y = THREE.MathUtils.lerp(
-            boxer.rotation.y,
-            targetAngle,
-            Math.min(1, GAME_CONFIG.movement.turnSpeed * deltaTime)
-        );
-    } else {
-        boxer.rotation.y = THREE.MathUtils.lerp(
-            boxer.rotation.y,
-            yaw,
-            Math.min(1, GAME_CONFIG.movement.turnSpeed * deltaTime)
-        );
-    }
+    boxer.rotation.y = THREE.MathUtils.lerp(
+        boxer.rotation.y,
+        yaw,
+        Math.min(1, GAME_CONFIG.movement.turnSpeed * deltaTime * 1.5)
+    );
 }
 
-// --- MÁQUINA DE ESTADOS ACTUALIZADA ---
 function updateAnimationState() {
     if (!boxerMixer) return;
     
-    if (isVictorious) return; // Prioridad Máxima: Celebración
-    if (attackState) return;  // Prioridad 2: Ataques
+    if (isVictorious || attackState || boxerActions.dodging?.isRunning() || boxerActions.reaction?.isRunning()) return;
 
-    // Mantener la animación si estamos esquivando o reaccionando
-    if (boxerActions.dodging?.isRunning() || boxerActions.reaction?.isRunning()) return;
-
-    // Prioridad 3: Bloqueo sostenido
-    if (keyStates['KeyB'] && playerOnFloor) {
+    // Guardia activa usando la Barra Espaciadora
+    if (keyStates['Space'] && playerOnFloor) {
         fadeToAction('block', 0.2);
         return; 
     }
 
-    // Movimiento normal
-    const horizontalSpeed = Math.sqrt(
-        playerVelocity.x * playerVelocity.x +
-        playerVelocity.z * playerVelocity.z
-    );
+    const horizontalSpeed = Math.sqrt(playerVelocity.x * playerVelocity.x + playerVelocity.z * playerVelocity.z);
 
     if (!playerOnFloor) {
         fadeToAction('Idle', 0.12);
@@ -555,7 +504,7 @@ function updateAnimationState() {
 }
 
 // =========================
-// ACCIONES DEFENSIVAS Y REACCIONES
+// ACCIONES DEFENSIVAS
 // =========================
 function triggerDodge() {
     if (!playerOnFloor) return;
@@ -565,36 +514,29 @@ function triggerDodge() {
 function triggerReaction() {
     if (isVictorious || roundEnded) return;
     
-    attackState = null; // Cancela cualquier golpe en progreso
+    attackState = null;
     playOneShot('reaction', 0.05, 0.2);
     
-    health = Math.max(0, health - 10);
+    health -= 10;
     updateHud();
 }
 
 // =========================
-// ATAQUES Y COLISIONES DE GOLPE
+// ATAQUES Y COLISIONES
 // =========================
 function startAttack(name) {
     if (attackState || !ATTACK_CONFIG[name]) return;
-
     attackState = {
-        name,
-        timer: 0,
-        duration: ATTACK_CONFIG[name].duration,
-        activeStart: ATTACK_CONFIG[name].activeStart,
-        activeEnd: ATTACK_CONFIG[name].activeEnd,
+        name, timer: 0, duration: ATTACK_CONFIG[name].duration,
+        activeStart: ATTACK_CONFIG[name].activeStart, activeEnd: ATTACK_CONFIG[name].activeEnd,
         hitTargets: new Set()
     };
-
     playOneShot(name, 0.06, 0.12);
 }
 
 function updateAttack(deltaTime) {
     if (!attackState || roundEnded) return;
-
     attackState.timer += deltaTime;
-
     const cfg = ATTACK_CONFIG[attackState.name];
 
     if (attackState.timer >= attackState.activeStart && attackState.timer <= attackState.activeEnd) {
@@ -627,21 +569,19 @@ function processAttackHits(cfg, hitTargets) {
 
         if (dist > 0.0001) {
             toTarget.normalize();
-            const dot = toTarget.dot(attackForward);
-            if (dot < 0.15) continue;
+            if (toTarget.dot(attackForward) < 0.15) continue;
         }
 
-        const dx = target.position.x - attackPoint.x;
-        const dz = target.position.z - attackPoint.z;
-        const hitDistSq = (dx * dx) + (dz * dz);
-        
+        const hitDistSq = Math.pow(target.position.x - attackPoint.x, 2) + Math.pow(target.position.z - attackPoint.z, 2);
         const strikeRadius = cfg.radius + target.radius;
 
         if (hitDistSq <= (strikeRadius * strikeRadius)) {
             hitTargets.add(target.id);
-
             target.hitFlash = 0.16;
-            target.tiltVelocity += cfg.impulse * 0.06;
+            
+            // Empujar el costal fuertemente hacia ATRÁS
+            target.tiltVelocity -= cfg.impulse * 0.15; 
+            
             target.health -= (cfg.score * 0.35);
 
             combo += 1;
@@ -654,7 +594,6 @@ function processAttackHits(cfg, hitTargets) {
                 combo += 1;
                 comboTimer = 2.8;
             }
-
             updateHud();
         }
     }
@@ -687,29 +626,25 @@ async function loadBoxer() {
     boxer = model;
     boxerMixer = new THREE.AnimationMixer(boxer);
 
-    // Animaciones Base
+    // Animaciones
     const idleFbx  = await fbxLoader.loadAsync('./models/fbx/Idle.fbx');
     const walkFbx  = await fbxLoader.loadAsync('./models/fbx/walk.fbx');
     const runFbx   = await fbxLoader.loadAsync('./models/fbx/run.fbx');
     const jabFbx   = await fbxLoader.loadAsync('./models/fbx/jab.fbx');
     const hookFbx  = await fbxLoader.loadAsync('./models/fbx/hook.fbx');
     const blockFbx = await fbxLoader.loadAsync('./models/fbx/block.fbx');
-
-    // NUEVAS ANIMACIONES
     const uppercutFbx = await fbxLoader.loadAsync('./models/fbx/Uppercut.fbx');
     const crossFbx    = await fbxLoader.loadAsync('./models/fbx/Cross.fbx');
     const dodgingFbx  = await fbxLoader.loadAsync('./models/fbx/Dodging.fbx');
     const reactionFbx = await fbxLoader.loadAsync('./models/fbx/Reaction.fbx');
     const victoryFbx  = await fbxLoader.loadAsync('./models/fbx/Victory.fbx');
 
-    // Registro
     boxerActions.Idle  = boxerMixer.clipAction(idleFbx.animations[0]);
     boxerActions.walk  = boxerMixer.clipAction(walkFbx.animations[0]);
     boxerActions.run   = boxerMixer.clipAction(runFbx.animations[0]);
     boxerActions.jab   = boxerMixer.clipAction(jabFbx.animations[0]);
     boxerActions.hook  = boxerMixer.clipAction(hookFbx.animations[0]);
     boxerActions.block = boxerMixer.clipAction(blockFbx.animations[0]);
-    
     boxerActions.uppercut = boxerMixer.clipAction(uppercutFbx.animations[0]);
     boxerActions.cross    = boxerMixer.clipAction(crossFbx.animations[0]);
     boxerActions.dodging  = boxerMixer.clipAction(dodgingFbx.animations[0]);
@@ -723,7 +658,7 @@ async function loadBoxer() {
 }
 
 // =========================
-// COSTAL GLB
+// COSTAL Y LÓGICA DE DAÑO
 // =========================
 async function createPunchingBag(x, z) {
     return new Promise((resolve, reject) => {
@@ -731,12 +666,8 @@ async function createPunchingBag(x, z) {
             'poly.glb',
             (gltf) => {
                 const bag = gltf.scene;
-
                 bag.traverse((child) => {
-                    if (child.isMesh) {
-                        child.castShadow = true;
-                        child.receiveShadow = true;
-                    }
+                    if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
                 });
 
                 bag.scale.setScalar(params.bagScale);
@@ -745,8 +676,7 @@ async function createPunchingBag(x, z) {
                 const box = new THREE.Box3().setFromObject(bag);
                 const size = new THREE.Vector3();
                 const center = new THREE.Vector3();
-                box.getSize(size);
-                box.getCenter(center);
+                box.getSize(size); box.getCenter(center);
 
                 bag.position.x -= center.x;
                 bag.position.z -= center.z;
@@ -762,55 +692,59 @@ async function createPunchingBag(x, z) {
                 const radius = Math.max(0.45, Math.max(size.x, size.z) * 0.45);
 
                 const target = {
-                    id: nextTargetId++,
-                    type: 'bag',
-                    group: pivot,
-                    mesh: bag,
-                    position: pivot.position,
-                    radius,
-                    health: 200,
-                    tilt: 0,
-                    tiltVelocity: 0,
-                    hitFlash: 0
+                    id: nextTargetId++, type: 'bag', group: pivot, mesh: bag,
+                    position: pivot.position, radius, health: 200, tilt: 0, tiltVelocity: 0, hitFlash: 0
                 };
 
                 targetObjects.push(target);
                 resolve(target);
             },
-            undefined,
-            (error) => reject(error)
+            undefined, (error) => reject(error)
         );
     });
 }
 
 async function createBags() {
-    while (bagGroup.children.length > 0) {
-        bagGroup.remove(bagGroup.children[0]);
-    }
-
+    while (bagGroup.children.length > 0) bagGroup.remove(bagGroup.children[0]);
     for (let i = targetObjects.length - 1; i >= 0; i--) {
-        if (targetObjects[i].type === 'bag') {
-            targetObjects.splice(i, 1);
-        }
+        if (targetObjects[i].type === 'bag') targetObjects.splice(i, 1);
     }
-
-    const z = -worldInfo.halfDepth * 0.15;
-    const x = 0;
-
-    await createPunchingBag(x, z);
+    await createPunchingBag(0, -worldInfo.halfDepth * 0.15);
 }
 
 function updateTargets(deltaTime) {
+    const playerCenter = vector1.set(
+        (playerCollider.start.x + playerCollider.end.x) * 0.5,
+        playerCollider.start.y + 0.9,
+        (playerCollider.start.z + playerCollider.end.z) * 0.5
+    );
+
     for (const target of targetObjects) {
-        target.tiltVelocity += (-target.tilt * 9.5) * deltaTime;
-        target.tiltVelocity *= Math.exp(-5.5 * deltaTime);
+        // Físicas de péndulo
+        target.tiltVelocity += (-target.tilt * 14.0) * deltaTime; 
+        target.tiltVelocity *= Math.exp(-2.5 * deltaTime); 
         target.tilt += target.tiltVelocity * deltaTime;
-        target.tilt = THREE.MathUtils.clamp(target.tilt, -0.45, 0.45);
+        target.tilt = THREE.MathUtils.clamp(target.tilt, -0.6, 0.6); 
+        
+        target.group.rotation.x = target.tilt;
 
-        target.group.rotation.z = target.tilt;
+        if (target.hitFlash > 0) target.hitFlash -= deltaTime;
 
-        if (target.hitFlash > 0) {
-            target.hitFlash -= deltaTime;
+        // LÓGICA DE DAÑO DEL COSTAL (Rebote)
+        if (target.type === 'bag' && target.tilt > 0.15 && target.tiltVelocity > 0.8) {
+            const dx = playerCenter.x - target.position.x;
+            const dz = playerCenter.z - target.position.z;
+            const distSq = (dx * dx) + (dz * dz);
+            
+            const hitRadius = target.radius + PLAYER_RADIUS + 0.35; 
+            
+            if (distSq < (hitRadius * hitRadius)) {
+                // Validamos contra la Barra Espaciadora (Space) en lugar de KeyB
+                if (!keyStates['Space'] && !boxerActions.dodging?.isRunning() && !boxerActions.reaction?.isRunning()) {
+                    triggerReaction();
+                    target.tiltVelocity *= -0.4; // El costal rebota en ti
+                }
+            }
         }
     }
 }
@@ -820,86 +754,46 @@ function updateTargets(deltaTime) {
 // =========================
 function playerCollisions() {
     const result = worldOctree.capsuleIntersect(playerCollider);
-
     playerOnFloor = false;
 
     if (result) {
         playerOnFloor = result.normal.y > 0;
-
-        if (!playerOnFloor) {
-            playerVelocity.addScaledVector(result.normal, -result.normal.dot(playerVelocity));
-        }
-
-        if (result.depth >= 1e-10) {
-            playerCollider.translate(result.normal.multiplyScalar(result.depth));
-        }
+        if (!playerOnFloor) playerVelocity.addScaledVector(result.normal, -result.normal.dot(playerVelocity));
+        if (result.depth >= 1e-10) playerCollider.translate(result.normal.multiplyScalar(result.depth));
     }
 }
 
-// =========================
-// CONTROLES DE MOVIMIENTO FÍSICO
-// =========================
 function controls(deltaTime) {
-    // Si terminó la ronda, estamos celebrando o recibiendo daño, no nos movemos
     if (roundEnded || isVictorious || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
-    const isBlocking = keyStates['KeyB'];
+    // El bloqueo ahora está en Space
+    const isBlocking = keyStates['Space'];
     const running = keyStates['ShiftLeft'] && !isBlocking;
     
     const baseSpeed = running ? GAME_CONFIG.movement.runSpeed : (isBlocking ? 4 : GAME_CONFIG.movement.walkSpeed);
     const airSpeed = running ? GAME_CONFIG.movement.airRunSpeed : GAME_CONFIG.movement.airWalkSpeed;
     const speedDelta = deltaTime * (playerOnFloor ? baseSpeed : airSpeed);
 
-    if (keyStates['KeyW']) {
-        playerVelocity.add(getForwardVector().multiplyScalar(speedDelta));
-    }
-
-    if (keyStates['KeyS']) {
-        playerVelocity.add(getForwardVector().multiplyScalar(-speedDelta));
-    }
-
-    if (keyStates['KeyA']) {
-        playerVelocity.add(getSideVector().multiplyScalar(-speedDelta));
-    }
-
-    if (keyStates['KeyD']) {
-        playerVelocity.add(getSideVector().multiplyScalar(speedDelta));
-    }
-
-    if (playerOnFloor && keyStates['Space'] && !isBlocking) {
-        playerVelocity.y = GAME_CONFIG.movement.jumpForce;
-    }
+    if (keyStates['KeyW']) playerVelocity.add(getForwardVector().multiplyScalar(speedDelta));
+    if (keyStates['KeyS']) playerVelocity.add(getForwardVector().multiplyScalar(-speedDelta));
+    if (keyStates['KeyA']) playerVelocity.add(getSideVector().multiplyScalar(-speedDelta));
+    if (keyStates['KeyD']) playerVelocity.add(getSideVector().multiplyScalar(speedDelta));
 }
 
-// =========================
-// CÁMARA TERCERA PERSONA
-// =========================
 function updateThirdPersonCamera(deltaTime) {
     headPosition.copy(playerCollider.end);
+    const camDirection = vector2.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).normalize();
 
-    const camDirection = vector2.set(
-        Math.sin(yaw) * Math.cos(pitch),
-        Math.sin(pitch),
-        Math.cos(yaw) * Math.cos(pitch)
-    ).normalize();
-
-    desiredCameraPos
-        .copy(headPosition)
-        .addScaledVector(camDirection, -params.cameraDistance);
-
+    desiredCameraPos.copy(headPosition).addScaledVector(camDirection, -params.cameraDistance);
     desiredCameraPos.y += params.cameraHeight;
 
     camera.position.lerp(desiredCameraPos, Math.min(1, GAME_CONFIG.camera.followSpeed * deltaTime));
 
     cameraTarget.copy(headPosition);
     cameraTarget.y += 0.25;
-
     camera.lookAt(cameraTarget);
 }
 
-// =========================
-// ACTUALIZAR JUGADOR
-// =========================
 function updatePlayer(deltaTime) {
     let damping = Math.exp(-4 * deltaTime) - 1;
 
@@ -919,7 +813,7 @@ function updatePlayer(deltaTime) {
 
     playerCollisions();
 
-    // Colisión matemática con el costal
+    // Colisión matemática estática con el costal
     const px = (playerCollider.start.x + playerCollider.end.x) * 0.5;
     const pz = (playerCollider.start.z + playerCollider.end.z) * 0.5;
 
@@ -927,16 +821,12 @@ function updatePlayer(deltaTime) {
         const dx = px - target.position.x;
         const dz = pz - target.position.z;
         const distSq = (dx * dx) + (dz * dz);
-        
         const minDist = target.radius + PLAYER_RADIUS + 0.15; 
         
         if (distSq < (minDist * minDist) && distSq > 0.0001) {
             const dist = Math.sqrt(distSq); 
             const overlap = minDist - dist;
-            const pushX = (dx / dist) * overlap;
-            const pushZ = (dz / dist) * overlap;
-            
-            playerCollider.translate(new THREE.Vector3(pushX, 0, pushZ));
+            playerCollider.translate(new THREE.Vector3((dx / dist) * overlap, 0, (dz / dist) * overlap));
         }
     }
 
@@ -944,12 +834,8 @@ function updatePlayer(deltaTime) {
     updateThirdPersonCamera(deltaTime);
 }
 
-// =========================
-// MANTENER JUGADOR DENTRO DEL RING
-// =========================
 function keepPlayerInsideBounds() {
     const margin = 0.75;
-
     const minX = worldInfo.center.x - worldInfo.halfWidth + margin;
     const maxX = worldInfo.center.x + worldInfo.halfWidth - margin;
     const minZ = worldInfo.center.z - worldInfo.halfDepth + margin;
@@ -966,56 +852,40 @@ function keepPlayerInsideBounds() {
 
     if (Math.abs(dx) > 1e-5 || Math.abs(dz) > 1e-5) {
         playerCollider.translate(new THREE.Vector3(dx, 0, dz));
-
         if (dx !== 0) playerVelocity.x = 0;
         if (dz !== 0) playerVelocity.z = 0;
     }
 }
 
-// =========================
-// SPAWN DEL JUGADOR
-// =========================
 function setPlayerSpawn() {
     const spawnX = worldInfo.center.x;
     const spawnZ = worldInfo.center.z + worldInfo.halfDepth * 0.35;
-    const spawnY = worldInfo.floorY + 0.38;
+    const spawnY = worldInfo.floorY + 2.0; 
 
     playerCollider.start.set(spawnX, spawnY, spawnZ);
     playerCollider.end.set(spawnX, spawnY + (PLAYER_HEIGHT - PLAYER_RADIUS), spawnZ);
-
     playerVelocity.set(0, 0, 0);
-    yaw = Math.PI;
-    pitch = -0.12;
+    yaw = Math.PI; pitch = -0.12;
 
     updateThirdPersonCamera(1);
 }
 
-// =========================
-// TELEPORT SI CAE
-// =========================
 function teleportPlayerIfOob() {
-    if (camera.position.y < worldInfo.floorY - 10) {
-        setPlayerSpawn();
-    }
+    if (camera.position.y < worldInfo.floorY - 10) setPlayerSpawn();
 }
 
-// =========================
-// AJUSTAR MODELO AL RING
-// =========================
 function fitModelToRing(root) {
     tempBox.setFromObject(root);
     tempBox.getSize(tempSize);
     tempBox.getCenter(tempCenter);
 
     const currentMaxXZ = Math.max(tempSize.x, tempSize.z);
-    const targetMaxXZ = 14;
-    const autoScale = currentMaxXZ > 0 ? targetMaxXZ / currentMaxXZ : 1;
+    const autoScale = currentMaxXZ > 0 ? 14 / currentMaxXZ : 1;
 
     root.scale.setScalar(autoScale);
     root.updateMatrixWorld(true);
 
     tempBox.setFromObject(root);
-    tempBox.getSize(tempSize);
     tempBox.getCenter(tempCenter);
 
     root.position.x -= tempCenter.x;
@@ -1026,9 +896,6 @@ function fitModelToRing(root) {
     worldInfo.modelScale = autoScale;
 }
 
-// =========================
-// CALCULAR INFO DEL MUNDO
-// =========================
 function computeWorldInfo(root) {
     worldInfo.box.setFromObject(root);
     worldInfo.box.getCenter(worldInfo.center);
@@ -1039,9 +906,8 @@ function computeWorldInfo(root) {
     worldInfo.halfDepth = Math.max(1.8, worldInfo.size.z * 0.18);
 
     const maxDim = Math.max(worldInfo.size.x, worldInfo.size.z, 10);
-
     scene.fog.far = Math.max(params.fogFar, maxDim * 4);
-
+    
     directionalLight.shadow.camera.left = -maxDim * 1.8;
     directionalLight.shadow.camera.right = maxDim * 1.8;
     directionalLight.shadow.camera.top = maxDim * 1.8;
@@ -1051,30 +917,42 @@ function computeWorldInfo(root) {
 }
 
 // =========================
-// RONDA Y CELEBRACIÓN
+// RONDA Y KO
 // =========================
-function endRound() {
+function endRound(reason) {
     roundEnded = true;
     pointerLocked = false;
     document.exitPointerLock();
 
-    // Lógica de Victoria
-    if (score >= 250) {
-        isVictorious = true;
-        fadeToAction('victory', 0.5); // Llama a la animación de triunfo
-        showMessage(`¡Victoria!\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
+    updateHud(); 
+
+    if (reason === 'ko') {
+        fadeToAction('reaction', 0.5); 
+        showMessage(`¡K.O.!\nEl costal te noqueó.\nScore: ${score}\n\nPresiona 'R' para reiniciar`);
     } else {
-        showMessage(`Fin del round\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
+        if (score >= 250) {
+            isVictorious = true;
+            fadeToAction('victory', 0.5); 
+            showMessage(`¡Victoria!\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
+        } else {
+            showMessage(`Fin del round\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
+        }
     }
 }
 
 function updateGameState(deltaTime) {
     if (roundEnded) return;
 
+    if (health <= 0) {
+        health = 0;
+        endRound('ko');
+        return;
+    }
+
     timeLeft -= deltaTime;
     if (timeLeft <= 0) {
         timeLeft = 0;
-        endRound();
+        endRound('time');
     }
 
     if (comboTimer > 0) {
@@ -1082,7 +960,6 @@ function updateGameState(deltaTime) {
         if (comboTimer <= 0) combo = 0;
     }
 
-    health = Math.max(0, health);
     updateHud();
 }
 
@@ -1100,17 +977,9 @@ gltfLoader.load(
             if (child.isMesh) {
                 child.castShadow = true;
                 child.receiveShadow = true;
-
                 if (child.material) {
-                    if (Array.isArray(child.material)) {
-                        child.material.forEach((mat) => {
-                            if ('side' in mat) mat.side = THREE.FrontSide;
-                            if (mat.map) mat.map.anisotropy = 4;
-                        });
-                    } else {
-                        child.material.side = THREE.FrontSide;
-                        if (child.material.map) child.material.map.anisotropy = 4;
-                    }
+                    if (Array.isArray(child.material)) child.material.forEach(mat => { if ('side' in mat) mat.side = THREE.FrontSide; if (mat.map) mat.map.anisotropy = 4; });
+                    else { child.material.side = THREE.FrontSide; if (child.material.map) child.material.map.anisotropy = 4; }
                 }
             }
         });
@@ -1120,57 +989,29 @@ gltfLoader.load(
         computeWorldInfo(model);
         worldOctree.fromGraphNode(model);
 
-        try {
-            octreeHelper = new OctreeHelper(worldOctree);
-            octreeHelper.visible = params.showOctree;
-            scene.add(octreeHelper);
-        } catch (e) {
-            octreeHelper = null;
-        }
+        try { octreeHelper = new OctreeHelper(worldOctree); octreeHelper.visible = params.showOctree; scene.add(octreeHelper); } catch (e) { octreeHelper = null; }
 
         setPlayerSpawn();
 
-        try {
-            await createBags();
-        } catch (error) {
-            console.error('Error cargando poly.glb:', error);
-        }
+        try { await createBags(); } catch (error) { console.error('Error cargando props:', error); }
 
-        try {
-            await loadBoxer();
-            updateBoxerTransform(0);
-            fadeToAction('Idle', 0.01);
-        } catch (error) {
-            console.error('Error cargando boxeador FBX:', error);
-        }
+        try { await loadBoxer(); updateBoxerTransform(0); fadeToAction('Idle', 0.01); } catch (error) { console.error('Error cargando boxeador FBX:', error); }
 
         worldReady = true;
         hideMessage();
     },
-    (xhr) => {
-        if (xhr.total) {
-            const percent = (xhr.loaded / xhr.total) * 100;
-            console.log(`Cargando ring: ${percent.toFixed(2)}%`);
-        }
-    },
-    (error) => {
-        console.error('Error cargando ring.glb:', error);
-    }
+    undefined,
+    (error) => console.error('Error cargando ring.glb:', error)
 );
 
-// =========================
-// RESIZE
-// =========================
-window.addEventListener('resize', onWindowResize);
-
-function onWindowResize() {
+window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
-}
+});
 
 // =========================
-// ANIMACIÓN
+// ANIMACIÓN PRINCIPAL
 // =========================
 function animate() {
     timer.update();
@@ -1189,12 +1030,10 @@ function animate() {
         updateAttack(fullDelta);
         updateBoxerTransform(fullDelta);
         updateAnimationState();
-        updateTargets(fullDelta);
+        updateTargets(fullDelta); 
         updateGameState(fullDelta);
 
-        if (boxerMixer) {
-            boxerMixer.update(fullDelta);
-        }
+        if (boxerMixer) boxerMixer.update(fullDelta);
     }
 
     const t = performance.now() * 0.001;
