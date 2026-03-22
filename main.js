@@ -281,11 +281,12 @@ let comboTimer = 0;
 
 let attackState = null;
 
+// --- DICCIONARIO DE ATAQUES REFINADO ---
 const ATTACK_CONFIG = {
-    jab:      { duration: 0.85, activeStart: 0.15, activeEnd: 0.35, range: 1.5, radius: 0.90, score: 20, impulse: 5.5 },
-    hook:     { duration: 1.10, activeStart: 0.25, activeEnd: 0.50, range: 1.7, radius: 1.15, score: 30, impulse: 9.5 },
-    uppercut: { duration: 1.20, activeStart: 0.30, activeEnd: 0.55, range: 1.3, radius: 1.00, score: 40, impulse: 14.0 },
-    cross:    { duration: 0.95, activeStart: 0.20, activeEnd: 0.45, range: 1.9, radius: 0.95, score: 25, impulse: 7.5 }
+    jab:      { duration: 0.90, activeStart: 0.20, activeEnd: 0.40, range: 0.75, radius: 0.35, score: 20, impulse: 5.5, speed: 1.0 },
+    hook:     { duration: 1.20, activeStart: 0.35, activeEnd: 0.55, range: 0.70, radius: 0.45, score: 30, impulse: 9.5, speed: 0.95 },
+    uppercut: { duration: 1.40, activeStart: 0.40, activeEnd: 0.65, range: 0.65, radius: 0.40, score: 40, impulse: 14.0, speed: 0.9 },
+    punching: { duration: 1.30, activeStart: 0.25, activeEnd: 0.60, range: 1.20, radius: 0.45, score: 25, impulse: 8.5, speed: 0.85 }
 };
 
 // =========================
@@ -331,13 +332,13 @@ gui.add(params, 'fogNear', 1, 30, 1).name('Niebla inicio').onChange((v) => scene
 gui.add(params, 'fogFar', 20, 160, 1).name('Niebla fin').onChange((v) => scene.fog.far = v);
 gui.add(params, 'cameraDistance', 2.5, 8.0, 0.1).name('Distancia cámara');
 gui.add(params, 'cameraHeight', 0.6, 3.5, 0.1).name('Altura cámara');
+gui.add(params, 'bagScale', 0.3, 2.0, 0.05).name('Escala costal');
 gui.add(params, 'showOctree').name('Mostrar octree').onChange((value) => { if (octreeHelper) octreeHelper.visible = value; });
 
 // =========================
-// EVENTOS DE TECLADO Y MOUSE (ACTUALIZADOS PARA ERGONOMÍA)
+// EVENTOS DE TECLADO Y MOUSE
 // =========================
 document.addEventListener('keydown', (event) => {
-    // Lista de teclas permitidas (WASD, Q, E, F, Espacio, Shift, R, Flechas)
     if ([
         'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD',
         'KeyQ', 'KeyE', 'KeyF', 'ShiftLeft',
@@ -350,11 +351,9 @@ document.addEventListener('keydown', (event) => {
 
     keyStates[event.code] = true;
 
-    // Controles de Cámara (Flechas)
     if (event.code === 'ArrowUp') { params.cameraDistance = Math.max(1.5, params.cameraDistance - 0.5); gui.controllersRecursive().forEach(c => c.updateDisplay()); }
     if (event.code === 'ArrowDown') { params.cameraDistance = Math.min(8.0, params.cameraDistance + 0.5); gui.controllersRecursive().forEach(c => c.updateDisplay()); }
 
-    // Reiniciar
     if (event.code === 'KeyR' && roundEnded) {
         score = 0;
         combo = 0;
@@ -374,36 +373,29 @@ document.addEventListener('keydown', (event) => {
 
     if (!worldReady || roundEnded) return;
 
-    // --- BLOQUEO TÁCTICO (Ahora con la Barra Espaciadora) ---
     if (keyStates['Space'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
-    // --- ATAQUES ESPECIALES CERCA DE WASD ---
-    if (event.code === 'KeyF') startAttack('hook');      // Gancho con el Índice
-    if (event.code === 'KeyQ') startAttack('uppercut');  // Uppercut con el Anular
+    if (event.code === 'KeyF') startAttack('hook');      
+    if (event.code === 'KeyQ') startAttack('uppercut');  
     
-    // --- ESQUIVAR ---
-    if (event.code === 'KeyE') triggerDodge();           // Esquivar con el Índice
+    if (event.code === 'KeyE') triggerDodge();           
 });
 
 document.addEventListener('keyup', (event) => {
     keyStates[event.code] = false;
 });
 
-// --- ATAQUES POR CLIC DE MOUSE ---
 document.addEventListener('mousedown', (event) => {
     if (!pointerLocked || !worldReady || roundEnded) return;
-    
-    // No golpear si estamos bloqueando (Space), recibiendo daño o esquivando
     if (keyStates['Space'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
     if (event.button === 0) {
-        startAttack('jab'); // Clic Izquierdo (Jab)
+        startAttack('jab'); 
     } else if (event.button === 2) {
-        startAttack('cross'); // Clic Derecho (Cross)
+        startAttack('punching'); 
     }
 });
 
-// Evitar menú contextual al dar clic derecho
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 
 container.addEventListener('click', () => {
@@ -436,15 +428,17 @@ function fadeToAction(name, duration = 0.2) {
     const previousAction = activeAction;
     activeAction = nextAction;
     if (previousAction) previousAction.fadeOut(duration);
-    activeAction.reset().setEffectiveTimeScale(1).setEffectiveWeight(1).fadeIn(duration).play();
+    
+    activeAction.reset().setEffectiveTimeScale(1.0).setEffectiveWeight(1).fadeIn(duration).play();
 }
 
-function playOneShot(name, fadeIn = 0.08, fadeOut = 0.18) {
+function playOneShot(name, fadeIn = 0.08, fadeOut = 0.2, speed = 1.0) {
     const action = boxerActions[name];
     if (!action || !boxerMixer) return;
 
     action.reset();
     action.enabled = true;
+    action.setEffectiveTimeScale(speed); 
     action.setLoop(THREE.LoopOnce, 1);
     action.clampWhenFinished = true;
     action.fadeIn(fadeIn);
@@ -459,7 +453,6 @@ function playOneShot(name, fadeIn = 0.08, fadeOut = 0.18) {
     boxerMixer.addEventListener('finished', onFinished);
 }
 
-// MOVIMIENTO DE ROTACIÓN TIPO PELEA (Siempre mira al objetivo)
 function updateBoxerTransform(deltaTime) {
     if (!boxer) return;
 
@@ -481,23 +474,22 @@ function updateAnimationState() {
     
     if (isVictorious || attackState || boxerActions.dodging?.isRunning() || boxerActions.reaction?.isRunning()) return;
 
-    // Guardia activa usando la Barra Espaciadora
     if (keyStates['Space'] && playerOnFloor) {
-        fadeToAction('block', 0.2);
+        fadeToAction('block', 0.15);
         return; 
     }
 
     const horizontalSpeed = Math.sqrt(playerVelocity.x * playerVelocity.x + playerVelocity.z * playerVelocity.z);
 
     if (!playerOnFloor) {
-        fadeToAction('Idle', 0.12);
+        fadeToAction('Idle', 0.15);
         return;
     }
 
     if (horizontalSpeed > 4.8 && keyStates['ShiftLeft']) {
         fadeToAction('run', 0.15);
     } else if (horizontalSpeed > 0.15) {
-        fadeToAction('walk', 0.18);
+        fadeToAction('walk', 0.15);
     } else {
         fadeToAction('Idle', 0.2);
     }
@@ -508,14 +500,15 @@ function updateAnimationState() {
 // =========================
 function triggerDodge() {
     if (!playerOnFloor) return;
-    playOneShot('dodging', 0.1, 0.2);
+    // ESQUIVAR ACTUALIZADO: Le bajamos la velocidad a 0.85 (para que sea notorio) y suavizamos el fadeIn
+    playOneShot('dodging', 0.10, 0.25, 0.85);
 }
 
 function triggerReaction() {
     if (isVictorious || roundEnded) return;
     
     attackState = null;
-    playOneShot('reaction', 0.05, 0.2);
+    playOneShot('reaction', 0.05, 0.2, 1.1);
     
     health -= 10;
     updateHud();
@@ -526,12 +519,15 @@ function triggerReaction() {
 // =========================
 function startAttack(name) {
     if (attackState || !ATTACK_CONFIG[name]) return;
+    const cfg = ATTACK_CONFIG[name];
+
     attackState = {
-        name, timer: 0, duration: ATTACK_CONFIG[name].duration,
-        activeStart: ATTACK_CONFIG[name].activeStart, activeEnd: ATTACK_CONFIG[name].activeEnd,
+        name, timer: 0, duration: cfg.duration,
+        activeStart: cfg.activeStart, activeEnd: cfg.activeEnd,
         hitTargets: new Set()
     };
-    playOneShot(name, 0.06, 0.12);
+    
+    playOneShot(name, 0.05, 0.2, cfg.speed);
 }
 
 function updateAttack(deltaTime) {
@@ -579,7 +575,6 @@ function processAttackHits(cfg, hitTargets) {
             hitTargets.add(target.id);
             target.hitFlash = 0.16;
             
-            // Empujar el costal fuertemente hacia ATRÁS
             target.tiltVelocity -= cfg.impulse * 0.15; 
             
             target.health -= (cfg.score * 0.35);
@@ -626,7 +621,6 @@ async function loadBoxer() {
     boxer = model;
     boxerMixer = new THREE.AnimationMixer(boxer);
 
-    // Animaciones
     const idleFbx  = await fbxLoader.loadAsync('./models/fbx/Idle.fbx');
     const walkFbx  = await fbxLoader.loadAsync('./models/fbx/walk.fbx');
     const runFbx   = await fbxLoader.loadAsync('./models/fbx/run.fbx');
@@ -634,7 +628,7 @@ async function loadBoxer() {
     const hookFbx  = await fbxLoader.loadAsync('./models/fbx/hook.fbx');
     const blockFbx = await fbxLoader.loadAsync('./models/fbx/block.fbx');
     const uppercutFbx = await fbxLoader.loadAsync('./models/fbx/Uppercut.fbx');
-    const crossFbx    = await fbxLoader.loadAsync('./models/fbx/Cross.fbx');
+    const punchingFbx = await fbxLoader.loadAsync('./models/fbx/Punching.fbx');
     const dodgingFbx  = await fbxLoader.loadAsync('./models/fbx/Dodging.fbx');
     const reactionFbx = await fbxLoader.loadAsync('./models/fbx/Reaction.fbx');
     const victoryFbx  = await fbxLoader.loadAsync('./models/fbx/Victory.fbx');
@@ -646,7 +640,7 @@ async function loadBoxer() {
     boxerActions.hook  = boxerMixer.clipAction(hookFbx.animations[0]);
     boxerActions.block = boxerMixer.clipAction(blockFbx.animations[0]);
     boxerActions.uppercut = boxerMixer.clipAction(uppercutFbx.animations[0]);
-    boxerActions.cross    = boxerMixer.clipAction(crossFbx.animations[0]);
+    boxerActions.punching = boxerMixer.clipAction(punchingFbx.animations[0]);
     boxerActions.dodging  = boxerMixer.clipAction(dodgingFbx.animations[0]);
     boxerActions.reaction = boxerMixer.clipAction(reactionFbx.animations[0]);
     boxerActions.victory  = boxerMixer.clipAction(victoryFbx.animations[0]);
@@ -720,7 +714,6 @@ function updateTargets(deltaTime) {
     );
 
     for (const target of targetObjects) {
-        // Físicas de péndulo
         target.tiltVelocity += (-target.tilt * 14.0) * deltaTime; 
         target.tiltVelocity *= Math.exp(-2.5 * deltaTime); 
         target.tilt += target.tiltVelocity * deltaTime;
@@ -730,19 +723,17 @@ function updateTargets(deltaTime) {
 
         if (target.hitFlash > 0) target.hitFlash -= deltaTime;
 
-        // LÓGICA DE DAÑO DEL COSTAL (Rebote)
         if (target.type === 'bag' && target.tilt > 0.15 && target.tiltVelocity > 0.8) {
             const dx = playerCenter.x - target.position.x;
             const dz = playerCenter.z - target.position.z;
             const distSq = (dx * dx) + (dz * dz);
             
-            const hitRadius = target.radius + PLAYER_RADIUS + 0.35; 
+            const hitRadius = target.radius + PLAYER_RADIUS + 0.1; 
             
             if (distSq < (hitRadius * hitRadius)) {
-                // Validamos contra la Barra Espaciadora (Space) en lugar de KeyB
                 if (!keyStates['Space'] && !boxerActions.dodging?.isRunning() && !boxerActions.reaction?.isRunning()) {
                     triggerReaction();
-                    target.tiltVelocity *= -0.4; // El costal rebota en ti
+                    target.tiltVelocity *= -0.4; 
                 }
             }
         }
@@ -766,11 +757,15 @@ function playerCollisions() {
 function controls(deltaTime) {
     if (roundEnded || isVictorious || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
-    // El bloqueo ahora está en Space
     const isBlocking = keyStates['Space'];
     const running = keyStates['ShiftLeft'] && !isBlocking;
     
-    const baseSpeed = running ? GAME_CONFIG.movement.runSpeed : (isBlocking ? 4 : GAME_CONFIG.movement.walkSpeed);
+    let baseSpeed = running ? GAME_CONFIG.movement.runSpeed : (isBlocking ? 4 : GAME_CONFIG.movement.walkSpeed);
+    
+    if (attackState) {
+        baseSpeed *= 0.05; 
+    }
+
     const airSpeed = running ? GAME_CONFIG.movement.airRunSpeed : GAME_CONFIG.movement.airWalkSpeed;
     const speedDelta = deltaTime * (playerOnFloor ? baseSpeed : airSpeed);
 
