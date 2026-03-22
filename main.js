@@ -578,13 +578,15 @@ function processAttackHits(cfg, hitTargets) {
             if (dot < 0.15) continue; // Ángulo de visión
         }
 
-        // Medir distancia del impacto ignorando que el origen del costal está en el suelo
+        /// Medir distancia del impacto al cuadrado
         const dx = target.position.x - attackPoint.x;
         const dz = target.position.z - attackPoint.z;
-        const hitDist2D = Math.sqrt(dx * dx + dz * dz);
+        const hitDistSq = (dx * dx) + (dz * dz);
+        
+        const strikeRadius = cfg.radius + target.radius;
 
-        // Si la distancia plana es menor al radio del puño + el radio del costal
-        if (hitDist2D <= cfg.radius + target.radius) {
+      // Comparamos sin usar raíz cuadrada
+        if (hitDistSq <= (strikeRadius * strikeRadius)) {
             hitTargets.add(target.id);
 
             target.hitFlash = 0.16;
@@ -595,7 +597,6 @@ function processAttackHits(cfg, hitTargets) {
             comboTimer = 2.3;
             score += cfg.score + Math.max(0, combo - 1) * 5;
 
-            // Si el costal se queda sin vida (Score extra)
             if (target.health <= 0) {
                 target.health = 200;
                 score += 80;
@@ -851,18 +852,22 @@ function updatePlayer(deltaTime) {
 
     playerCollisions();
 
-    // --- COLISIÓN MATEMÁTICA CON EL COSTAL PARA NO ATRAVESARLO ---
+ // --- COLISIÓN MATEMÁTICA CON EL COSTAL (OPTIMIZADA) ---
     const px = (playerCollider.start.x + playerCollider.end.x) * 0.5;
     const pz = (playerCollider.start.z + playerCollider.end.z) * 0.5;
 
     for (const target of targetObjects) {
         const dx = px - target.position.x;
         const dz = pz - target.position.z;
-        const dist = Math.sqrt(dx * dx + dz * dz);
         
+        // Calculamos la distancia al cuadrado (sin raíz)
+        const distSq = (dx * dx) + (dz * dz);
         const minDist = target.radius + PLAYER_RADIUS + 0.15; 
         
-        if (dist < minDist && dist > 0.0001) {
+        // Comparamos contra la distancia mínima al cuadrado
+        if (distSq < (minDist * minDist) && distSq > 0.0001) {
+            // SOLO calculamos la raíz cuadrada si ya confirmamos que chocaron
+            const dist = Math.sqrt(distSq); 
             const overlap = minDist - dist;
             const pushX = (dx / dist) * overlap;
             const pushZ = (dz / dist) * overlap;
@@ -871,6 +876,7 @@ function updatePlayer(deltaTime) {
         }
     }
     // -------------------------------------------------------------
+ 
 
     keepPlayerInsideBounds();
     updateThirdPersonCamera(deltaTime);
