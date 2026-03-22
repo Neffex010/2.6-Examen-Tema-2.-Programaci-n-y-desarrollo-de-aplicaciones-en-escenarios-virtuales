@@ -241,6 +241,9 @@ let boxerOffsetY = 0;
 const boxerVisualHeight = 1.45;
 const boxerGroundAdjust = -0.35;
 
+// Nuevo estado para la celebración
+let isVictorious = false;
+
 // =========================
 // CONTROLES
 // =========================
@@ -278,10 +281,13 @@ let roundEnded = false;
 let comboTimer = 0;
 
 let attackState = null;
+
+// --- DICCIONARIO DE ATAQUES ACTUALIZADO ---
 const ATTACK_CONFIG = {
-    // Animaciones más largas para evitar cortes bruscos
-    jab:  { duration: 0.85, activeStart: 0.15, activeEnd: 0.35, range: 1.5, radius: 0.9, score: 20, impulse: 5.5 },
-    hook: { duration: 1.10, activeStart: 0.25, activeEnd: 0.50, range: 1.7, radius: 1.15, score: 30, impulse: 7.5 }
+    jab:      { duration: 0.85, activeStart: 0.15, activeEnd: 0.35, range: 1.5, radius: 0.90, score: 20, impulse: 5.5 },
+    hook:     { duration: 1.10, activeStart: 0.25, activeEnd: 0.50, range: 1.7, radius: 1.15, score: 30, impulse: 7.5 },
+    uppercut: { duration: 1.20, activeStart: 0.30, activeEnd: 0.55, range: 1.3, radius: 1.00, score: 40, impulse: 12.0 },
+    cross:    { duration: 0.95, activeStart: 0.20, activeEnd: 0.45, range: 1.9, radius: 0.95, score: 25, impulse: 6.5 }
 };
 
 // =========================
@@ -353,17 +359,16 @@ document.addEventListener('keydown', (event) => {
     if ([
         'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD',
         'KeyJ', 'KeyK', 'KeyB', 'ShiftLeft',
+        'KeyU', 'KeyI', 'KeyE', 'KeyH', // Nuevas teclas
         'ArrowUp', 'ArrowDown'
     ].includes(event.code)) {
         event.preventDefault();
     }
 
-    // Prevenir spam de teclado (Auto-repeat)
     if (event.repeat) return; 
 
     keyStates[event.code] = true;
 
-    // Control de cámara por teclado (Zoom)
     if (event.code === 'ArrowUp') {
         params.cameraDistance = Math.max(1.5, params.cameraDistance - 0.5);
         gui.controllersRecursive().forEach(c => c.updateDisplay());
@@ -373,34 +378,37 @@ document.addEventListener('keydown', (event) => {
         gui.controllersRecursive().forEach(c => c.updateDisplay());
     }
 
-    // Reiniciar partida
     if (event.code === 'KeyR' && roundEnded) {
         score = 0;
         combo = 0;
         health = 100;
         timeLeft = GAME_CONFIG.round.duration;
         roundEnded = false;
+        isVictorious = false;
         
         setPlayerSpawn();
         targetObjects.forEach(t => { t.health = 200; t.tilt = 0; t.tiltVelocity = 0; });
         
         hideMessage();
         updateHud();
+        fadeToAction('Idle', 0.2);
         return;
     }
 
     if (!worldReady || roundEnded) return;
 
-    // Bloqueo activo (Ignorar intentos de ataque)
-    if (keyStates['KeyB']) return;
+    // --- BLOQUEO TÁCTICO ---
+    // No atacar si estamos bloqueando, recibiendo daño o esquivando
+    if (keyStates['KeyB'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
-    if (event.code === 'KeyJ') {
-        startAttack('jab');
-    }
-
-    if (event.code === 'KeyK') {
-        startAttack('hook');
-    }
+    // --- ATAQUES Y DEFENSAS ---
+    if (event.code === 'KeyJ') startAttack('jab');
+    if (event.code === 'KeyK') startAttack('hook');
+    if (event.code === 'KeyU') startAttack('uppercut');
+    if (event.code === 'KeyI') startAttack('cross');
+    
+    if (event.code === 'KeyE') triggerDodge();
+    if (event.code === 'KeyH') triggerReaction(); // Tecla de prueba para el daño
 });
 
 document.addEventListener('keyup', (event) => {
@@ -474,7 +482,8 @@ function playOneShot(name, fadeIn = 0.08, fadeOut = 0.18) {
     const onFinished = (e) => {
         if (e.action !== action) return;
         boxerMixer.removeEventListener('finished', onFinished);
-        if (!attackState) fadeToAction('Idle', fadeOut);
+        // Regresa a Idle solo si no está en otra animación importante
+        if (!attackState && !isVictorious) fadeToAction('Idle', fadeOut);
     };
 
     boxerMixer.addEventListener('finished', onFinished);
@@ -509,20 +518,23 @@ function updateBoxerTransform(deltaTime) {
     }
 }
 
-// Máquina de estados pulida
+// --- MÁQUINA DE ESTADOS ACTUALIZADA ---
 function updateAnimationState() {
     if (!boxerMixer) return;
     
-    // Prioridad 1: Ataques
-    if (attackState) return;
+    if (isVictorious) return; // Prioridad Máxima: Celebración
+    if (attackState) return;  // Prioridad 2: Ataques
 
-    // Prioridad 2: Bloqueo sostenido
+    // Mantener la animación si estamos esquivando o reaccionando
+    if (boxerActions.dodging?.isRunning() || boxerActions.reaction?.isRunning()) return;
+
+    // Prioridad 3: Bloqueo sostenido
     if (keyStates['KeyB'] && playerOnFloor) {
         fadeToAction('block', 0.2);
         return; 
     }
 
-    // Prioridad 3: Movimiento
+    // Movimiento normal
     const horizontalSpeed = Math.sqrt(
         playerVelocity.x * playerVelocity.x +
         playerVelocity.z * playerVelocity.z
@@ -540,6 +552,24 @@ function updateAnimationState() {
     } else {
         fadeToAction('Idle', 0.2);
     }
+}
+
+// =========================
+// ACCIONES DEFENSIVAS Y REACCIONES
+// =========================
+function triggerDodge() {
+    if (!playerOnFloor) return;
+    playOneShot('dodging', 0.1, 0.2);
+}
+
+function triggerReaction() {
+    if (isVictorious || roundEnded) return;
+    
+    attackState = null; // Cancela cualquier golpe en progreso
+    playOneShot('reaction', 0.05, 0.2);
+    
+    health = Math.max(0, health - 10);
+    updateHud();
 }
 
 // =========================
@@ -590,7 +620,7 @@ function processAttackHits(cfg, hitTargets) {
         if (hitTargets.has(target.id)) continue;
 
         const toTarget = vector4.copy(target.position).sub(playerCenter);
-        toTarget.y = 0; // Ignorar la altura para impacto
+        toTarget.y = 0; 
         const dist = toTarget.length();
         
         if (dist > cfg.range + cfg.radius) continue;
@@ -601,7 +631,6 @@ function processAttackHits(cfg, hitTargets) {
             if (dot < 0.15) continue;
         }
 
-        // Colisión optimizada matemáticamente al cuadrado
         const dx = target.position.x - attackPoint.x;
         const dz = target.position.z - attackPoint.z;
         const hitDistSq = (dx * dx) + (dz * dz);
@@ -632,7 +661,7 @@ function processAttackHits(cfg, hitTargets) {
 }
 
 // =========================
-// CARGAR BOXEADOR
+// CARGAR BOXEADOR Y ANIMACIONES
 // =========================
 async function loadBoxer() {
     const model = await fbxLoader.loadAsync('./models/fbx/character.fbx');
@@ -658,6 +687,7 @@ async function loadBoxer() {
     boxer = model;
     boxerMixer = new THREE.AnimationMixer(boxer);
 
+    // Animaciones Base
     const idleFbx  = await fbxLoader.loadAsync('./models/fbx/Idle.fbx');
     const walkFbx  = await fbxLoader.loadAsync('./models/fbx/walk.fbx');
     const runFbx   = await fbxLoader.loadAsync('./models/fbx/run.fbx');
@@ -665,12 +695,26 @@ async function loadBoxer() {
     const hookFbx  = await fbxLoader.loadAsync('./models/fbx/hook.fbx');
     const blockFbx = await fbxLoader.loadAsync('./models/fbx/block.fbx');
 
+    // NUEVAS ANIMACIONES
+    const uppercutFbx = await fbxLoader.loadAsync('./models/fbx/Uppercut.fbx');
+    const crossFbx    = await fbxLoader.loadAsync('./models/fbx/Cross.fbx');
+    const dodgingFbx  = await fbxLoader.loadAsync('./models/fbx/Dodging.fbx');
+    const reactionFbx = await fbxLoader.loadAsync('./models/fbx/Reaction.fbx');
+    const victoryFbx  = await fbxLoader.loadAsync('./models/fbx/Victory.fbx');
+
+    // Registro
     boxerActions.Idle  = boxerMixer.clipAction(idleFbx.animations[0]);
     boxerActions.walk  = boxerMixer.clipAction(walkFbx.animations[0]);
     boxerActions.run   = boxerMixer.clipAction(runFbx.animations[0]);
     boxerActions.jab   = boxerMixer.clipAction(jabFbx.animations[0]);
     boxerActions.hook  = boxerMixer.clipAction(hookFbx.animations[0]);
     boxerActions.block = boxerMixer.clipAction(blockFbx.animations[0]);
+    
+    boxerActions.uppercut = boxerMixer.clipAction(uppercutFbx.animations[0]);
+    boxerActions.cross    = boxerMixer.clipAction(crossFbx.animations[0]);
+    boxerActions.dodging  = boxerMixer.clipAction(dodgingFbx.animations[0]);
+    boxerActions.reaction = boxerMixer.clipAction(reactionFbx.animations[0]);
+    boxerActions.victory  = boxerMixer.clipAction(victoryFbx.animations[0]);
 
     boxerActions.Idle.play();
     activeAction = boxerActions.Idle;
@@ -796,12 +840,12 @@ function playerCollisions() {
 // CONTROLES DE MOVIMIENTO FÍSICO
 // =========================
 function controls(deltaTime) {
-    if (roundEnded) return;
+    // Si terminó la ronda, estamos celebrando o recibiendo daño, no nos movemos
+    if (roundEnded || isVictorious || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
     const isBlocking = keyStates['KeyB'];
     const running = keyStates['ShiftLeft'] && !isBlocking;
     
-    // Penalización de velocidad al estar en guardia (bloqueando)
     const baseSpeed = running ? GAME_CONFIG.movement.runSpeed : (isBlocking ? 4 : GAME_CONFIG.movement.walkSpeed);
     const airSpeed = running ? GAME_CONFIG.movement.airRunSpeed : GAME_CONFIG.movement.airWalkSpeed;
     const speedDelta = deltaTime * (playerOnFloor ? baseSpeed : airSpeed);
@@ -822,7 +866,6 @@ function controls(deltaTime) {
         playerVelocity.add(getSideVector().multiplyScalar(speedDelta));
     }
 
-    // No se puede saltar si tienes la guardia arriba
     if (playerOnFloor && keyStates['Space'] && !isBlocking) {
         playerVelocity.y = GAME_CONFIG.movement.jumpForce;
     }
@@ -876,7 +919,7 @@ function updatePlayer(deltaTime) {
 
     playerCollisions();
 
-    // --- COLISIÓN MATEMÁTICA CON EL COSTAL OPTIMIZADA ---
+    // Colisión matemática con el costal
     const px = (playerCollider.start.x + playerCollider.end.x) * 0.5;
     const pz = (playerCollider.start.z + playerCollider.end.z) * 0.5;
 
@@ -1008,15 +1051,21 @@ function computeWorldInfo(root) {
 }
 
 // =========================
-// RONDA
+// RONDA Y CELEBRACIÓN
 // =========================
 function endRound() {
     roundEnded = true;
     pointerLocked = false;
     document.exitPointerLock();
 
-    const result = score >= 250 ? '¡Victoria!' : 'Fin del round';
-    showMessage(`${result}\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
+    // Lógica de Victoria
+    if (score >= 250) {
+        isVictorious = true;
+        fadeToAction('victory', 0.5); // Llama a la animación de triunfo
+        showMessage(`¡Victoria!\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
+    } else {
+        showMessage(`Fin del round\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
+    }
 }
 
 function updateGameState(deltaTime) {
