@@ -281,7 +281,6 @@ let comboTimer = 0;
 
 let attackState = null;
 
-// --- DICCIONARIO DE ATAQUES REFINADO ---
 const ATTACK_CONFIG = {
     jab:      { duration: 0.90, activeStart: 0.20, activeEnd: 0.40, range: 0.75, radius: 0.35, score: 20, impulse: 5.5, speed: 1.0 },
     hook:     { duration: 1.20, activeStart: 0.35, activeEnd: 0.55, range: 0.70, radius: 0.45, score: 30, impulse: 9.5, speed: 0.95 },
@@ -363,7 +362,8 @@ document.addEventListener('keydown', (event) => {
         isVictorious = false;
         
         setPlayerSpawn();
-        targetObjects.forEach(t => { t.health = 200; t.tilt = 0; t.tiltVelocity = 0; });
+        // Al reiniciar, restablecemos el péndulo 3D
+        targetObjects.forEach(t => { t.health = 200; t.swing.set(0,0); t.swingVelocity.set(0,0); t.hitFlash = 0; });
         
         hideMessage();
         updateHud();
@@ -385,6 +385,7 @@ document.addEventListener('keyup', (event) => {
     keyStates[event.code] = false;
 });
 
+// ATAQUES POR CLIC DE MOUSE
 document.addEventListener('mousedown', (event) => {
     if (!pointerLocked || !worldReady || roundEnded) return;
     if (keyStates['Space'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
@@ -500,7 +501,6 @@ function updateAnimationState() {
 // =========================
 function triggerDodge() {
     if (!playerOnFloor) return;
-    // ESQUIVAR ACTUALIZADO: Le bajamos la velocidad a 0.85 (para que sea notorio) y suavizamos el fadeIn
     playOneShot('dodging', 0.10, 0.25, 0.85);
 }
 
@@ -575,7 +575,9 @@ function processAttackHits(cfg, hitTargets) {
             hitTargets.add(target.id);
             target.hitFlash = 0.16;
             
-            target.tiltVelocity -= cfg.impulse * 0.15; 
+            // TRANSFERIR LA FUERZA AL PÉNDULO EN 3D
+            target.swingVelocity.x += attackForward.x * cfg.impulse * 0.12;
+            target.swingVelocity.y += attackForward.z * cfg.impulse * 0.12; // La 'y' del swing mapea a la 'z' del mundo
             
             target.health -= (cfg.score * 0.35);
 
@@ -652,7 +654,7 @@ async function loadBoxer() {
 }
 
 // =========================
-// COSTAL Y LÓGICA DE DAÑO
+// COSTAL: FÍSICA DE PÉNDULO 3D 
 // =========================
 async function createPunchingBag(x, z) {
     return new Promise((resolve, reject) => {
@@ -672,13 +674,15 @@ async function createPunchingBag(x, z) {
                 const center = new THREE.Vector3();
                 box.getSize(size); box.getCenter(center);
 
+                // ALINEACIÓN: El punto más alto del costal (box.max.y) quedará anclado al centro de rotación (0,0,0)
                 bag.position.x -= center.x;
                 bag.position.z -= center.z;
-                bag.position.y -= box.min.y;
+                bag.position.y -= box.max.y; 
                 bag.updateMatrixWorld(true);
 
                 const pivot = new THREE.Group();
-                pivot.position.set(x, worldInfo.floorY, z);
+                // AQUI LO LEVANTAMOS: Sumamos 0.85 a la altura para que flote mucho más arriba
+                pivot.position.set(x, worldInfo.floorY + size.y + 1, z);
                 pivot.add(bag);
 
                 bagGroup.add(pivot);
@@ -686,8 +690,12 @@ async function createPunchingBag(x, z) {
                 const radius = Math.max(0.45, Math.max(size.x, size.z) * 0.45);
 
                 const target = {
-                    id: nextTargetId++, type: 'bag', group: pivot, mesh: bag,
-                    position: pivot.position, radius, health: 200, tilt: 0, tiltVelocity: 0, hitFlash: 0
+                    id: nextTargetId++, type: 'bag', group: pivot, mesh: bag, pivot: pivot,
+                    position: new THREE.Vector3().copy(pivot.position), 
+                    bagHeight: size.y,
+                    radius, health: 200, hitFlash: 0,
+                    swing: new THREE.Vector2(0, 0), // Oscilación 2D (X y Z global)
+                    swingVelocity: new THREE.Vector2(0, 0)
                 };
 
                 targetObjects.push(target);
@@ -713,30 +721,55 @@ function updateTargets(deltaTime) {
         (playerCollider.start.z + playerCollider.end.z) * 0.5
     );
 
+    const tempLocalCenter = new THREE.Vector3();
+    const tempWorldCenter = new THREE.Vector3();
+
     for (const target of targetObjects) {
-        target.tiltVelocity += (-target.tilt * 14.0) * deltaTime; 
-        target.tiltVelocity *= Math.exp(-2.5 * deltaTime); 
-        target.tilt += target.tiltVelocity * deltaTime;
-        target.tilt = THREE.MathUtils.clamp(target.tilt, -0.6, 0.6); 
-        
-        target.group.rotation.x = target.tilt;
-
-        if (target.hitFlash > 0) target.hitFlash -= deltaTime;
-
-        if (target.type === 'bag' && target.tilt > 0.15 && target.tiltVelocity > 0.8) {
-            const dx = playerCenter.x - target.position.x;
-            const dz = playerCenter.z - target.position.z;
-            const distSq = (dx * dx) + (dz * dz);
+        if (target.type === 'bag') {
+            // LÓGICA DE PÉNDULO 3D
+            target.swingVelocity.x += (-target.swing.x * 20.0) * deltaTime;
+            target.swingVelocity.y += (-target.swing.y * 20.0) * deltaTime;
             
-            const hitRadius = target.radius + PLAYER_RADIUS + 0.1; 
+            // Fricción para que se detenga gradualmente
+            target.swingVelocity.multiplyScalar(Math.exp(-3.5 * deltaTime));
             
-            if (distSq < (hitRadius * hitRadius)) {
-                if (!keyStates['Space'] && !boxerActions.dodging?.isRunning() && !boxerActions.reaction?.isRunning()) {
-                    triggerReaction();
-                    target.tiltVelocity *= -0.4; 
+            target.swing.x += target.swingVelocity.x * deltaTime;
+            target.swing.y += target.swingVelocity.y * deltaTime;
+            
+            const swingMag = target.swing.length();
+            if (swingMag > 0.8) target.swing.multiplyScalar(0.8 / swingMag);
+
+            // Mapear el Swing a la rotación 3D del pivot
+            target.pivot.rotation.x = target.swing.y;
+            target.pivot.rotation.z = -target.swing.x;
+
+            // Calcular la posición real de la "panza" del costal en el espacio 3D
+            tempLocalCenter.set(0, -target.bagHeight * 0.5, 0);
+            tempWorldCenter.copy(tempLocalCenter).applyMatrix4(target.pivot.matrixWorld);
+            target.position.copy(tempWorldCenter);
+
+            // LÓGICA DE DAÑO (El costal te golpea de regreso)
+            const speedSq = target.swingVelocity.lengthSq();
+            if (speedSq > 0.5) { 
+                const dx = playerCenter.x - target.position.x;
+                const dz = playerCenter.z - target.position.z;
+                const distSq = (dx * dx) + (dz * dz);
+                
+                const hitRadius = target.radius + PLAYER_RADIUS + 0.2; 
+                
+                if (distSq < (hitRadius * hitRadius)) {
+                    // Verificar si el costal se mueve HACIA el jugador
+                    const dotProduct = (dx * target.swingVelocity.x) + (dz * target.swingVelocity.y);
+                    
+                    if (dotProduct > 0.1 && !keyStates['Space'] && !boxerActions.dodging?.isRunning() && !boxerActions.reaction?.isRunning()) {
+                        triggerReaction();
+                        target.swingVelocity.multiplyScalar(-0.2); // El jugador absorbe el impacto y frena el costal
+                    }
                 }
             }
         }
+
+        if (target.hitFlash > 0) target.hitFlash -= deltaTime;
     }
 }
 
@@ -808,7 +841,7 @@ function updatePlayer(deltaTime) {
 
     playerCollisions();
 
-    // Colisión matemática estática con el costal
+    // Colisión matemática dinámica con el costal (Para no atravesarlo)
     const px = (playerCollider.start.x + playerCollider.end.x) * 0.5;
     const pz = (playerCollider.start.z + playerCollider.end.z) * 0.5;
 
