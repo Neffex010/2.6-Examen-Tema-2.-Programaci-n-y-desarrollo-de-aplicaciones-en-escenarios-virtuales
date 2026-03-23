@@ -1,54 +1,179 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <title>Box Ring Simulator 3D</title>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <title>Box Training 3D</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Roboto:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
 
-    <link type="text/css" rel="stylesheet" href="./main.css">
+    <link rel="stylesheet" href="./main.css">
 
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥊</text></svg>">
 </head>
 <body>
-    <nav class="navbar">
-        <div class="nav-container">
-            <a href="#" class="nav-logo">🥊 BOX RING 3D</a>
-            <ul class="nav-menu">
-                <li><span style="color: #f3f3f3; font-family: 'Bebas Neue', cursive; font-size: 1.2rem; letter-spacing: 1px;">Proyecto de WebGL</span></li>
-            </ul>
+    <!-- MARCO SUPERIOR -->
+    <header class="topbar">
+        <div class="topbar__inner">
+            <div class="brand">
+                <span class="brand__emoji">🥊</span>
+                <div class="brand__text">
+                    <h1>BOX TRAINING 3D</h1>
+                    <p>Modo entrenamiento arcade</p>
+                </div>
+            </div>
+
+            <div class="topbar__meta">
+                <div class="meta-pill">WebGL + Three.js</div>
+                <div class="meta-pill meta-pill--gold">Training Mode</div>
+            </div>
         </div>
-    </nav>
+    </header>
 
-    <div id="info">
-        <span class="info-highlight">🖱 MIRAR:</span> Mouse •
-        <span class="info-highlight">🚶 MOVER:</span> WASD (+ Shift) •
-        <span class="info-highlight">🥊 GOLPEAR:</span> Clics / Q / F •
-        <span class="info-highlight">🛡️ GUARDIA:</span> Mantener Espacio •
-        <span class="info-highlight">💨 ESQUIVAR:</span> E
-    </div>
+    <!-- CONTENEDOR 3D -->
+    <main id="app">
+        <div id="container" aria-label="Escenario 3D del juego"></div>
 
-    <div id="container"></div>
+        <!-- VIÑETA / MARCO VISUAL -->
+        <div class="screen-vignette"></div>
+        <div class="screen-frame"></div>
 
-    <div class="corner corner-left">RED CORNER</div>
-    <div class="corner corner-right">BLUE CORNER</div>
+        <!-- HUD SUPERIOR -->
+        <section class="hud-top" aria-label="Información del combate">
+            <div class="hud-panel hud-panel--left">
+                <div class="hud-title">OBJETIVO</div>
+                <div class="hud-value" id="hudGoal">Alcanza el mayor score posible</div>
+            </div>
 
+            <div class="hud-center">
+                <div class="round-badge">
+                    <span class="round-badge__label">MODE</span>
+                    <span class="round-badge__value">TRAINING</span>
+                </div>
+            </div>
+
+            <div class="hud-panel hud-panel--right">
+                <div class="hud-title">RANGO META</div>
+                <div class="hud-value" id="hudRankGoal">B / A / S / SS</div>
+            </div>
+        </section>
+
+        <!-- LATERALES -->
+        <aside class="side-tag side-tag--left">RED CORNER</aside>
+        <aside class="side-tag side-tag--right">BLUE CORNER</aside>
+
+        <!-- PANEL DE CONTROLES -->
+        <section class="controls-bar" id="info" aria-label="Controles">
+            <span><strong>🖱 Mirar:</strong> Mouse</span>
+            <span><strong>🚶 Mover:</strong> WASD + Shift</span>
+            <span><strong>🥊 Golpear:</strong> Clic Izq / Clic Der / Q / F</span>
+            <span><strong>🛡 Guardia:</strong> Espacio</span>
+            <span><strong>💨 Esquivar:</strong> E</span>
+            <span><strong>🔁 Reiniciar:</strong> R</span>
+        </section>
+
+        <!-- CAPA DONDE EL JS PINTA LOS TEXTOS DE COMBO -->
+        <div id="combo-fx-layer" aria-hidden="true"></div>
+
+        <!-- OVERLAY INICIAL -->
+        <section class="overlay overlay--intro" id="startOverlay">
+            <div class="overlay-card">
+                <div class="overlay-card__eyebrow">BOX TRAINING 3D</div>
+                <h2>Entrenamiento de Box</h2>
+                <p>
+                    Conecta golpes, arma combos, administra tu estamina y consigue
+                    el mejor rango antes de que termine el round.
+                </p>
+
+                <div class="overlay-goals">
+                    <div class="goal-card">
+                        <span class="goal-card__label">META</span>
+                        <span class="goal-card__value">Score alto</span>
+                    </div>
+                    <div class="goal-card">
+                        <span class="goal-card__label">PLUS</span>
+                        <span class="goal-card__value">Combo largo</span>
+                    </div>
+                    <div class="goal-card">
+                        <span class="goal-card__label">RIESGO</span>
+                        <span class="goal-card__value">No agotarte</span>
+                    </div>
+                </div>
+
+                <div class="overlay-controls">
+                    <span>Mouse para mirar</span>
+                    <span>WASD para moverte</span>
+                    <span>Clic en pantalla para iniciar</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- OVERLAY DE CUENTA REGRESIVA -->
+        <section class="overlay overlay--countdown is-hidden" id="countdownOverlay">
+            <div class="countdown-box">
+                <span class="countdown-box__label">PREPÁRATE</span>
+                <span class="countdown-box__number" id="countdownNumber">3</span>
+            </div>
+        </section>
+
+        <!-- OVERLAY DE RESULTADOS -->
+        <section class="overlay overlay--results is-hidden" id="resultsOverlay">
+            <div class="results-card">
+                <div class="results-card__header">
+                    <span class="results-card__eyebrow">RESULTADOS</span>
+                    <h2>Resumen del Round</h2>
+                </div>
+
+                <div class="results-rank">
+                    <span class="results-rank__label">RANGO</span>
+                    <span class="results-rank__value" id="finalRank">B</span>
+                </div>
+
+                <div class="results-grid">
+                    <div class="result-item">
+                        <span class="result-item__label">Score Final</span>
+                        <span class="result-item__value" id="finalScore">0</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-item__label">Combo Máximo</span>
+                        <span class="result-item__value" id="finalCombo">0</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-item__label">Golpes Conectados</span>
+                        <span class="result-item__value" id="finalHits">0</span>
+                    </div>
+                    <div class="result-item">
+                        <span class="result-item__label">Veces Agotado</span>
+                        <span class="result-item__value" id="finalTired">0</span>
+                    </div>
+                </div>
+
+                <div class="results-footer">
+                    <p id="finalMessage">Buen trabajo. Sigue entrenando y mejora tu rango.</p>
+                    <div class="results-tip">Presiona <strong>R</strong> para reiniciar el round</div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- FOOTER -->
     <footer class="footer">
-        <div class="footer-container">
-            <p>© 2026 Boxing Ring Simulator • Proyecto ITICS - Tec de Pachuca</p>
+        <div class="footer__inner">
+            <span>© 2026 Box Training 3D</span>
+            <span>Proyecto WebGL / Three.js</span>
+            <span>ITICS - Tec de Pachuca</span>
         </div>
     </footer>
 
     <script type="importmap">
-        {
-            "imports": {
-                "three": "./build/three.module.js",
-                "three/addons/": "./jsm/"
-            }
+    {
+        "imports": {
+            "three": "./build/three.module.js",
+            "three/addons/": "./jsm/"
         }
+    }
     </script>
 
     <script type="module" src="./main.js"></script>

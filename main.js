@@ -8,6 +8,24 @@ import { Capsule } from 'three/addons/math/Capsule.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 
 // =========================
+// DOM UI NUEVO
+// =========================
+const startOverlay = document.getElementById('startOverlay');
+const countdownOverlay = document.getElementById('countdownOverlay');
+const countdownNumber = document.getElementById('countdownNumber');
+const resultsOverlay = document.getElementById('resultsOverlay');
+
+const hudGoal = document.getElementById('hudGoal');
+const hudRankGoal = document.getElementById('hudRankGoal');
+
+const finalRankEl = document.getElementById('finalRank');
+const finalScoreEl = document.getElementById('finalScore');
+const finalComboEl = document.getElementById('finalCombo');
+const finalHitsEl = document.getElementById('finalHits');
+const finalTiredEl = document.getElementById('finalTired');
+const finalMessageEl = document.getElementById('finalMessage');
+
+// =========================
 // TEMPORIZADOR
 // =========================
 const timer = new THREE.Timer();
@@ -32,14 +50,40 @@ const GAME_CONFIG = {
     },
     camera: {
         followSpeed: 12,
-        collisionRadius: 0.22
+        collisionRadius: 0.22,
+        attackZoomDistance: 4.0,
+        impactZoomBoost: 0.22,
+        zoomLerp: 8
     },
     round: {
         duration: 60
+    },
+    scoreRanks: {
+        C: 0,
+        B: 250,
+        A: 400,
+        S: 550,
+        SS: 700
     }
 };
 
 const STEPS_PER_FRAME = GAME_CONFIG.physics.stepsPerFrame;
+
+// =========================
+// ESTADOS DE FLUJO
+// =========================
+const FLOW = {
+    LOADING: 'loading',
+    INTRO: 'intro',
+    COUNTDOWN: 'countdown',
+    PLAYING: 'playing',
+    RESULTS: 'results'
+};
+
+let gameFlow = FLOW.LOADING;
+let countdownTimer = 0;
+let countdownStage = 0;
+const countdownSteps = ['3', '2', '1', 'FIGHT'];
 
 // =========================
 // ESCENA
@@ -117,27 +161,18 @@ const timeElement = ensureHudElement('time', 'Tiempo: 60', 138, 18);
 const comboElement = ensureHudElement('combo', 'Combo: x0', 190, 18);
 const staminaElement = ensureHudElement('stamina', 'Estamina: 100%', 242, 18);
 
-let messageElement = document.getElementById('message');
-if (!messageElement) {
-    messageElement = document.createElement('div');
-    messageElement.id = 'message';
-    messageElement.style.position = 'fixed';
-    messageElement.style.left = '50%';
-    messageElement.style.top = '50%';
-    messageElement.style.transform = 'translate(-50%, -50%)';
-    messageElement.style.zIndex = '1300';
-    messageElement.style.padding = '18px 24px';
-    messageElement.style.borderRadius = '18px';
-    messageElement.style.background = 'rgba(12,12,18,0.88)';
-    messageElement.style.border = '2px solid rgba(255,215,90,0.85)';
-    messageElement.style.color = '#fff';
-    messageElement.style.fontFamily = 'Arial, sans-serif';
-    messageElement.style.fontSize = '28px';
-    messageElement.style.fontWeight = '800';
-    messageElement.style.display = 'none';
-    messageElement.style.textAlign = 'center';
-    messageElement.style.whiteSpace = 'pre-line';
-    document.body.appendChild(messageElement);
+let comboFxLayer = document.getElementById('combo-fx-layer');
+if (!comboFxLayer) {
+    comboFxLayer = document.createElement('div');
+    comboFxLayer.id = 'combo-fx-layer';
+    comboFxLayer.style.position = 'fixed';
+    comboFxLayer.style.left = '0';
+    comboFxLayer.style.top = '0';
+    comboFxLayer.style.width = '100%';
+    comboFxLayer.style.height = '100%';
+    comboFxLayer.style.pointerEvents = 'none';
+    comboFxLayer.style.zIndex = '1400';
+    document.body.appendChild(comboFxLayer);
 }
 
 // =========================
@@ -242,8 +277,6 @@ let boxerOffsetY = 0;
 const boxerVisualHeight = 1.45;
 const boxerGroundAdjust = -0.35;
 
-let isVictorious = false;
-
 // =========================
 // CONTROLES
 // =========================
@@ -275,17 +308,20 @@ const tempSize = new THREE.Vector3();
 const tempCenter = new THREE.Vector3();
 
 // =========================
-// JUEGO Y COMBATE (ESTAMINA)
+// JUEGO Y COMBATE
 // =========================
 let score = 0;
 let combo = 0;
+let maxCombo = 0;
 let stamina = 100;
 let isTired = false;
 let timeLeft = GAME_CONFIG.round.duration;
-let roundEnded = false;
 let comboTimer = 0;
-
 let attackState = null;
+let comboHudPulse = 0;
+let tiredCount = 0;
+let hitsConnected = 0;
+let roundEnded = false;
 
 const ATTACK_CONFIG = {
     jab:      { name: 'jab',      duration: 0.90, activeStart: 0.20, activeEnd: 0.40, range: 0.75, radius: 0.35, score: 20, impulse: 5.5, speed: 1.0, staminaCost: 8 },
@@ -298,12 +334,8 @@ const ATTACK_CONFIG = {
 // OBJETOS DE ENTRENAMIENTO
 // =========================
 const targetObjects = [];
-const targetGroup = new THREE.Group();
 const bagGroup = new THREE.Group();
-
-scene.add(targetGroup);
 scene.add(bagGroup);
-
 let nextTargetId = 1;
 
 // =========================
@@ -316,6 +348,12 @@ const currentShake = {
 };
 
 let hitParticles = null;
+let impactFlashes = null;
+let trailManager = null;
+let comboFxManager = null;
+
+let combatZoom = 0;
+let targetCombatZoom = 0;
 
 function triggerCameraShake(intensity, duration) {
     currentShake.intensity = Math.max(currentShake.intensity, intensity);
@@ -325,6 +363,22 @@ function triggerCameraShake(intensity, duration) {
 // =========================
 // UI
 // =========================
+function getRankFromScore(value) {
+    if (value >= GAME_CONFIG.scoreRanks.SS) return 'SS';
+    if (value >= GAME_CONFIG.scoreRanks.S) return 'S';
+    if (value >= GAME_CONFIG.scoreRanks.A) return 'A';
+    if (value >= GAME_CONFIG.scoreRanks.B) return 'B';
+    return 'C';
+}
+
+function getResultMessage(rank) {
+    if (rank === 'SS') return 'Dominaste el entrenamiento. Nivel élite.';
+    if (rank === 'S') return 'Excelente round. Tus combinaciones estuvieron brutales.';
+    if (rank === 'A') return 'Muy buen desempeño. Ya se siente sólido.';
+    if (rank === 'B') return 'Buen trabajo. Vas por buen camino.';
+    return 'Sigue entrenando. Todavía puedes mejorar mucho más.';
+}
+
 function updateHud() {
     scoreElement.textContent = `Score: ${score}`;
     timeElement.textContent = `Tiempo: ${Math.max(0, Math.ceil(timeLeft))}`;
@@ -332,27 +386,125 @@ function updateHud() {
 
     if (isTired) {
         staminaElement.style.color = '#ff4444';
-        staminaElement.textContent = `¡AGOTADO! Levanta guardia (${Math.max(0, Math.ceil(stamina))}%)`;
+        staminaElement.textContent = `¡AGOTADO! (${Math.max(0, Math.ceil(stamina))}%)`;
     } else {
         staminaElement.style.color = '#fff';
         staminaElement.textContent = `Estamina: ${Math.max(0, Math.ceil(stamina))}%`;
     }
+
+    const glowStrength = Math.min(1, combo / 10);
+    const scaleBoost = 1 + comboHudPulse * 0.18 + glowStrength * 0.08;
+
+    comboElement.style.transform = `scale(${scaleBoost})`;
+    comboElement.style.transformOrigin = 'left center';
+
+    if (combo > 0) {
+        comboElement.style.color = combo >= 5 ? '#ffd54a' : '#ffffff';
+        comboElement.style.borderColor = combo >= 5
+            ? 'rgba(255, 213, 74, 0.95)'
+            : 'rgba(255,255,255,0.45)';
+
+        comboElement.style.boxShadow = combo >= 5
+            ? `0 0 ${18 + combo * 2}px rgba(255, 204, 64, ${0.25 + glowStrength * 0.35})`
+            : `0 0 ${10 + combo * 1.4}px rgba(255,255,255,${0.12 + glowStrength * 0.12})`;
+
+        comboElement.style.background = combo >= 5
+            ? 'linear-gradient(135deg, rgba(40,22,0,0.92), rgba(90,55,0,0.88))'
+            : 'rgba(18,18,24,0.82)';
+    } else {
+        comboElement.style.color = '#fff';
+        comboElement.style.borderColor = 'rgba(255,215,90,0.75)';
+        comboElement.style.boxShadow = '0 8px 22px rgba(0,0,0,0.28)';
+        comboElement.style.background = 'rgba(18,18,24,0.82)';
+        comboElement.style.transform = 'scale(1)';
+    }
+
+    if (hudGoal) hudGoal.textContent = 'Haz el mayor score posible en 60 segundos';
+    if (hudRankGoal) hudRankGoal.textContent = 'B:250 / A:400 / S:550 / SS:700';
 }
 
-function showMessage(text) {
-    messageElement.textContent = text;
-    messageElement.style.display = 'block';
+function showIntro() {
+    gameFlow = FLOW.INTRO;
+    startOverlay?.classList.remove('is-hidden');
+    countdownOverlay?.classList.add('is-hidden');
+    resultsOverlay?.classList.add('is-hidden');
 }
 
-function hideMessage() {
-    messageElement.style.display = 'none';
+function startCountdown() {
+    if (!worldReady) return;
+    gameFlow = FLOW.COUNTDOWN;
+    countdownStage = 0;
+    countdownTimer = 1.0;
+    if (countdownNumber) countdownNumber.textContent = countdownSteps[countdownStage];
+    startOverlay?.classList.add('is-hidden');
+    resultsOverlay?.classList.add('is-hidden');
+    countdownOverlay?.classList.remove('is-hidden');
+}
+
+function beginRound() {
+    gameFlow = FLOW.PLAYING;
+    roundEnded = false;
+    timeLeft = GAME_CONFIG.round.duration;
+    countdownOverlay?.classList.add('is-hidden');
+    updateHud();
+    container.requestPointerLock();
+}
+
+function showResults() {
+    const rank = getRankFromScore(score);
+
+    if (finalRankEl) finalRankEl.textContent = rank;
+    if (finalScoreEl) finalScoreEl.textContent = `${score}`;
+    if (finalComboEl) finalComboEl.textContent = `${maxCombo}`;
+    if (finalHitsEl) finalHitsEl.textContent = `${hitsConnected}`;
+    if (finalTiredEl) finalTiredEl.textContent = `${tiredCount}`;
+    if (finalMessageEl) finalMessageEl.textContent = getResultMessage(rank);
+
+    resultsOverlay?.classList.remove('is-hidden');
+}
+
+function resetRoundStats() {
+    score = 0;
+    combo = 0;
+    maxCombo = 0;
+    stamina = 100;
+    isTired = false;
+    timeLeft = GAME_CONFIG.round.duration;
+    comboTimer = 0;
+    attackState = null;
+    comboHudPulse = 0;
+    tiredCount = 0;
+    hitsConnected = 0;
+    combatZoom = 0;
+    targetCombatZoom = 0;
+    roundEnded = false;
+
+    targetObjects.forEach(t => {
+        t.health = 200;
+        t.swing.set(0, 0);
+        t.swingVelocity.set(0, 0);
+        t.hitFlash = 0;
+    });
+
+    if (comboFxManager) comboFxManager.clear();
+    setPlayerSpawn();
+    updateHud();
+    fadeToAction('Idle', 0.2);
+}
+
+function finishRound() {
+    roundEnded = true;
+    gameFlow = FLOW.RESULTS;
+    pointerLocked = false;
+    document.exitPointerLock();
+    showResults();
 }
 
 // =========================
 // GUI
 // =========================
 const gui = new GUI({ width: 280 });
-gui.title('Box Ring');
+gui.title('Box Training 3D');
 gui.add(params, 'exposure', 0.4, 2.0, 0.01).name('Exposición').onChange((v) => renderer.toneMappingExposure = v);
 gui.add(directionalLight, 'intensity', 0, 5, 0.1).name('Luz Principal');
 gui.add(hemiLight, 'intensity', 0, 3, 0.1).name('Luz Ambiental');
@@ -372,7 +524,7 @@ document.addEventListener('keydown', (event) => {
     if ([
         'Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD',
         'KeyQ', 'KeyE', 'KeyF', 'ShiftLeft',
-        'ArrowUp', 'ArrowDown', 'KeyR'
+        'ArrowUp', 'ArrowDown', 'KeyR', 'Enter'
     ].includes(event.code)) {
         event.preventDefault();
     }
@@ -391,32 +543,14 @@ document.addEventListener('keydown', (event) => {
         gui.controllersRecursive().forEach(c => c.updateDisplay());
     }
 
-    if (event.code === 'KeyR' && roundEnded) {
-        score = 0;
-        combo = 0;
-        stamina = 100;
-        isTired = false;
-        timeLeft = GAME_CONFIG.round.duration;
-        roundEnded = false;
-        isVictorious = false;
-        attackState = null;
-
-        setPlayerSpawn();
-
-        targetObjects.forEach(t => {
-            t.health = 200;
-            t.swing.set(0, 0);
-            t.swingVelocity.set(0, 0);
-            t.hitFlash = 0;
-        });
-
-        hideMessage();
-        updateHud();
-        fadeToAction('Idle', 0.2);
+    if (event.code === 'KeyR' && (gameFlow === FLOW.RESULTS || gameFlow === FLOW.PLAYING)) {
+        resetRoundStats();
+        resultsOverlay?.classList.add('is-hidden');
+        startCountdown();
         return;
     }
 
-    if (!worldReady || roundEnded || isTired) return;
+    if (!worldReady || gameFlow !== FLOW.PLAYING || roundEnded || isTired) return;
     if (keyStates['Space'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
     if (event.code === 'KeyF') startAttack('hook');
@@ -429,7 +563,14 @@ document.addEventListener('keyup', (event) => {
 });
 
 document.addEventListener('mousedown', (event) => {
-    if (!pointerLocked || !worldReady || roundEnded || isTired) return;
+    if (!worldReady) return;
+
+    if (gameFlow === FLOW.INTRO) {
+        startCountdown();
+        return;
+    }
+
+    if (!pointerLocked || gameFlow !== FLOW.PLAYING || roundEnded || isTired) return;
     if (keyStates['Space'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
     if (event.button === 0) {
@@ -442,7 +583,14 @@ document.addEventListener('mousedown', (event) => {
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 
 container.addEventListener('click', () => {
-    if (!roundEnded) container.requestPointerLock();
+    if (!worldReady) return;
+    if (gameFlow === FLOW.INTRO) {
+        startCountdown();
+        return;
+    }
+    if (gameFlow === FLOW.PLAYING && !roundEnded) {
+        container.requestPointerLock();
+    }
 });
 
 document.addEventListener('pointerlockchange', () => {
@@ -450,7 +598,7 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 document.addEventListener('mousemove', (event) => {
-    if (!pointerLocked || !worldReady || roundEnded) return;
+    if (!pointerLocked || !worldReady || gameFlow !== FLOW.PLAYING) return;
 
     yaw -= event.movementX / 500;
     pitch -= event.movementY / 500;
@@ -504,7 +652,7 @@ function playOneShot(name, fadeIn = 0.08, fadeOut = 0.2, speed = 1.0) {
     const onFinished = (e) => {
         if (e.action !== action) return;
         boxerMixer.removeEventListener('finished', onFinished);
-        if (!attackState && !isVictorious && !isTired) fadeToAction('Idle', fadeOut);
+        if (!attackState && !isTired) fadeToAction('Idle', fadeOut);
     };
 
     boxerMixer.addEventListener('finished', onFinished);
@@ -529,23 +677,16 @@ function updateBoxerTransform(deltaTime) {
 function updateAnimationState() {
     if (!boxerMixer) return;
 
-    if (boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning() || isVictorious) return;
+    if (boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
     if (isTired) {
         if (attackState) attackState = null;
-
-        if (boxerActions.block) {
-            boxerActions.block.setEffectiveTimeScale(0.7);
-        }
-
+        if (boxerActions.block) boxerActions.block.setEffectiveTimeScale(0.7);
         fadeToAction('block', 0.3);
         return;
     }
 
-    if (boxerActions.block) {
-        boxerActions.block.setEffectiveTimeScale(1.0);
-    }
-
+    if (boxerActions.block) boxerActions.block.setEffectiveTimeScale(1.0);
     if (attackState) return;
 
     if (keyStates['Space'] && playerOnFloor) {
@@ -560,13 +701,9 @@ function updateAnimationState() {
         return;
     }
 
-    if (horizontalSpeed > 6.2 && keyStates['ShiftLeft']) {
-        fadeToAction('run', 0.15);
-    } else if (horizontalSpeed > 0.18) {
-        fadeToAction('walk', 0.15);
-    } else {
-        fadeToAction('Idle', 0.2);
-    }
+    if (horizontalSpeed > 6.2 && keyStates['ShiftLeft']) fadeToAction('run', 0.15);
+    else if (horizontalSpeed > 0.18) fadeToAction('walk', 0.15);
+    else fadeToAction('Idle', 0.2);
 }
 
 // =========================
@@ -576,14 +713,18 @@ function triggerDodge() {
     if (!playerOnFloor || stamina < 5) return;
 
     stamina -= 5;
-    if (stamina < 0) stamina = 0;
-
+    stamina = Math.max(0, stamina);
     updateHud();
     playOneShot('dodging', 0.10, 0.25, 0.85);
 }
 
+function setTiredState() {
+    if (!isTired) tiredCount += 1;
+    isTired = true;
+}
+
 function triggerBagHit() {
-    if (isVictorious || roundEnded || isTired) return;
+    if (roundEnded || isTired) return;
 
     attackState = null;
     playOneShot('reaction', 0.05, 0.2, 1.1);
@@ -594,7 +735,7 @@ function triggerBagHit() {
 
     if (stamina <= 0) {
         stamina = 0;
-        isTired = true;
+        setTiredState();
     }
 
     updateHud();
@@ -610,7 +751,7 @@ function startAttack(name) {
 
     if (stamina < cfg.staminaCost) {
         stamina = 0;
-        isTired = true;
+        setTiredState();
         updateHud();
         return;
     }
@@ -627,7 +768,40 @@ function startAttack(name) {
         hitTargets: new Set()
     };
 
+    targetCombatZoom = 1.0;
     playOneShot(name, 0.05, 0.2, cfg.speed);
+}
+
+function spawnAttackTrail() {
+    if (!trailManager || !attackState || !boxer) return;
+
+    const playerCenter = new THREE.Vector3(
+        (playerCollider.start.x + playerCollider.end.x) * 0.5,
+        playerCollider.start.y + 1.15,
+        (playerCollider.start.z + playerCollider.end.z) * 0.5
+    );
+
+    const forward = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw)).normalize();
+    const right = new THREE.Vector3(forward.z, 0, -forward.x).normalize();
+
+    let sideOffset = 0.28;
+    let reach = 0.75;
+
+    if (attackState.name === 'hook') {
+        sideOffset = 0.42;
+        reach = 0.82;
+    } else if (attackState.name === 'uppercut') {
+        sideOffset = 0.18;
+        reach = 0.62;
+    } else if (attackState.name === 'punching') {
+        sideOffset = 0.34;
+        reach = 1.0;
+    }
+
+    const start = playerCenter.clone().addScaledVector(right, sideOffset);
+    const end = start.clone().addScaledVector(forward, reach).add(new THREE.Vector3(0, 0.05, 0));
+
+    trailManager.spawnTrail(start, end);
 }
 
 function updateAttack(deltaTime) {
@@ -638,10 +812,12 @@ function updateAttack(deltaTime) {
 
     if (attackState.timer >= attackState.activeStart && attackState.timer <= attackState.activeEnd) {
         processAttackHits(cfg, attackState.hitTargets);
+        spawnAttackTrail();
     }
 
     if (attackState.timer >= attackState.duration) {
         attackState = null;
+        targetCombatZoom = 0;
     }
 }
 
@@ -684,20 +860,20 @@ function processAttackHits(cfg, hitTargets) {
 
             target.health -= (cfg.score * 0.35);
 
+            hitsConnected += 1;
             combo += 1;
+            maxCombo = Math.max(maxCombo, combo);
             comboTimer = 2.3;
             score += cfg.score + Math.max(0, combo - 1) * 5;
-
             stamina = Math.min(100, stamina + 2);
 
             if (target.health <= 0) {
                 target.health = 200;
                 score += 80;
                 combo += 1;
+                maxCombo = Math.max(maxCombo, combo);
                 comboTimer = 2.8;
             }
-
-            updateHud();
 
             const vectorToBagSurface = toTarget.clone().normalize();
             const exactImpactPoint = target.position.clone().sub(
@@ -709,6 +885,13 @@ function processAttackHits(cfg, hitTargets) {
                 target.position.y + target.bagHeight / 2
             );
 
+            updateHud();
+            comboHudPulse = 1.0;
+
+            if (comboFxManager) {
+                comboFxManager.onHit(exactImpactPoint, combo, cfg.score, cfg.name);
+            }
+
             if (hitParticles) {
                 const reflectDir = attackForward
                     .clone()
@@ -716,8 +899,22 @@ function processAttackHits(cfg, hitTargets) {
                     .negate()
                     .add(new THREE.Vector3(0, 0.45, 0));
 
-                hitParticles.emit(exactImpactPoint, reflectDir, Math.max(6, Math.floor(cfg.score / 4)));
+                const heavy = cfg.name === 'uppercut' || cfg.name === 'hook';
+
+                hitParticles.emit(
+                    exactImpactPoint,
+                    reflectDir,
+                    heavy ? Math.max(14, Math.floor(cfg.score / 3)) : Math.max(8, Math.floor(cfg.score / 4)),
+                    heavy ? 'heavy' : 'hit'
+                );
             }
+
+            if (impactFlashes) {
+                const flashStrength = cfg.name === 'uppercut' ? 1.45 : (cfg.name === 'hook' ? 1.2 : 1.0);
+                impactFlashes.spawn(exactImpactPoint, flashStrength);
+            }
+
+            combatZoom = Math.min(1.0, combatZoom + GAME_CONFIG.camera.impactZoomBoost);
 
             let shakeInt = 0;
             if (cfg.name === 'jab') shakeInt = 0.05;
@@ -766,8 +963,7 @@ async function loadBoxer() {
         uppercut: './models/fbx/Uppercut.fbx',
         punching: './models/fbx/Punching.fbx',
         dodging: './models/fbx/Dodging.fbx',
-        reaction: './models/fbx/Reaction.fbx',
-        victory: './models/fbx/Victory.fbx'
+        reaction: './models/fbx/Reaction.fbx'
     };
 
     const entries = Object.entries(animFiles);
@@ -776,13 +972,10 @@ async function loadBoxer() {
         entries.map(async ([name, path]) => {
             try {
                 const fbx = await fbxLoader.loadAsync(path);
-                if (!fbx.animations || !fbx.animations[0]) {
-                    console.warn(`Animación inválida o vacía: ${name} -> ${path}`);
-                    return [name, null];
-                }
+                if (!fbx.animations || !fbx.animations[0]) return [name, null];
                 return [name, fbx.animations[0]];
             } catch (err) {
-                console.warn(`No se pudo cargar la animación "${name}" desde ${path}`, err);
+                console.warn(`No se pudo cargar la animación "${name}"`, err);
                 return [name, null];
             }
         })
@@ -793,9 +986,7 @@ async function loadBoxer() {
         boxerActions[name] = boxerMixer.clipAction(clip);
     }
 
-    if (!boxerActions.Idle) {
-        throw new Error('No se pudo cargar Idle.fbx. Esa animación es obligatoria.');
-    }
+    if (!boxerActions.Idle) throw new Error('No se pudo cargar Idle.fbx');
 
     boxerActions.Idle.play();
     activeAction = boxerActions.Idle;
@@ -804,7 +995,7 @@ async function loadBoxer() {
 }
 
 // =========================
-// COSTAL: FÍSICA DE PÉNDULO 3D
+// COSTAL
 // =========================
 async function createPunchingBag(x, z) {
     return new Promise((resolve, reject) => {
@@ -837,7 +1028,6 @@ async function createPunchingBag(x, z) {
                 const pivot = new THREE.Group();
                 pivot.position.set(x, worldInfo.floorY + size.y + 1, z);
                 pivot.add(bag);
-
                 bagGroup.add(pivot);
 
                 const radius = Math.max(0.45, Math.max(size.x, size.z) * 0.45);
@@ -890,7 +1080,6 @@ function updateTargets(deltaTime) {
         if (target.type === 'bag') {
             target.swingVelocity.x += (-target.swing.x * 20.0) * deltaTime;
             target.swingVelocity.y += (-target.swing.y * 20.0) * deltaTime;
-
             target.swingVelocity.multiplyScalar(Math.exp(-3.5 * deltaTime));
 
             target.swing.x += target.swingVelocity.x * deltaTime;
@@ -901,7 +1090,6 @@ function updateTargets(deltaTime) {
 
             target.pivot.rotation.x = target.swing.y;
             target.pivot.rotation.z = -target.swing.x;
-
             target.pivot.updateMatrixWorld(true);
 
             tempLocalCenter.set(0, -target.bagHeight * 0.5, 0);
@@ -957,7 +1145,7 @@ function playerCollisions() {
 }
 
 function controls(deltaTime) {
-    if (roundEnded || isVictorious || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
+    if (gameFlow !== FLOW.PLAYING || roundEnded || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
     const isBlocking = keyStates['Space'];
     const running = keyStates['ShiftLeft'] && !isBlocking && !isTired;
@@ -966,11 +1154,8 @@ function controls(deltaTime) {
         ? GAME_CONFIG.movement.runSpeed
         : (isBlocking ? 3.8 : GAME_CONFIG.movement.walkSpeed);
 
-    if (attackState) {
-        baseSpeed *= 0.05;
-    } else if (isTired) {
-        baseSpeed *= 0.3;
-    }
+    if (attackState) baseSpeed *= 0.05;
+    else if (isTired) baseSpeed *= 0.3;
 
     const airSpeed = running ? GAME_CONFIG.movement.airRunSpeed : GAME_CONFIG.movement.airWalkSpeed;
     const speedDelta = deltaTime * (playerOnFloor ? baseSpeed : airSpeed);
@@ -982,12 +1167,10 @@ function controls(deltaTime) {
 
     if (running && playerVelocity.lengthSq() > 1 && playerOnFloor) {
         stamina -= deltaTime * 8;
-
         if (stamina <= 0) {
             stamina = 0;
-            isTired = true;
+            setTiredState();
         }
-
         updateHud();
     }
 }
@@ -999,13 +1182,11 @@ function resolveCameraCollision(from, desired) {
 
     const dir = vector5.copy(desired).sub(from);
     const distance = dir.length();
-
     if (distance < 0.001) return resolvedCameraPos;
 
     dir.normalize();
 
     const rayResult = worldOctree.rayIntersect(new THREE.Ray(from.clone(), dir));
-
     if (rayResult && rayResult.distance < distance) {
         const safeDistance = Math.max(0.1, rayResult.distance - GAME_CONFIG.camera.collisionRadius);
         resolvedCameraPos.copy(from).addScaledVector(dir, safeDistance);
@@ -1023,7 +1204,19 @@ function updateThirdPersonCamera(deltaTime) {
         Math.cos(yaw) * Math.cos(pitch)
     ).normalize();
 
-    desiredCameraPos.copy(headPosition).addScaledVector(camDirection, -params.cameraDistance);
+    combatZoom = THREE.MathUtils.lerp(
+        combatZoom,
+        targetCombatZoom,
+        Math.min(1, GAME_CONFIG.camera.zoomLerp * deltaTime)
+    );
+
+    const dynamicDistance = THREE.MathUtils.lerp(
+        params.cameraDistance,
+        GAME_CONFIG.camera.attackZoomDistance,
+        combatZoom
+    );
+
+    desiredCameraPos.copy(headPosition).addScaledVector(camDirection, -dynamicDistance);
     desiredCameraPos.y += params.cameraHeight;
 
     const lookOrigin = vector6.copy(headPosition);
@@ -1045,6 +1238,8 @@ function updateThirdPersonCamera(deltaTime) {
     cameraTarget.copy(headPosition);
     cameraTarget.y += 0.25;
     camera.lookAt(cameraTarget);
+
+    combatZoom *= Math.exp(-4.5 * deltaTime);
 }
 
 function updatePlayer(deltaTime) {
@@ -1177,27 +1372,28 @@ function computeWorldInfo(root) {
 }
 
 // =========================
-// RONDA Y ESTADOS DE JUEGO
+// GAME STATE
 // =========================
-function endRound(reason) {
-    roundEnded = true;
-    pointerLocked = false;
-    document.exitPointerLock();
+function updateFlow(deltaTime) {
+    if (gameFlow !== FLOW.COUNTDOWN) return;
 
-    updateHud();
+    countdownTimer -= deltaTime;
 
-    if (score >= 250) {
-        isVictorious = true;
-        fadeToAction('victory', 0.5);
-        showMessage(`¡Victoria!\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
-    } else {
-        fadeToAction('Idle', 0.5);
-        showMessage(`Fin del round\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
+    if (countdownTimer <= 0) {
+        countdownStage += 1;
+
+        if (countdownStage >= countdownSteps.length) {
+            beginRound();
+            return;
+        }
+
+        countdownTimer = countdownStage === countdownSteps.length - 1 ? 0.65 : 1.0;
+        if (countdownNumber) countdownNumber.textContent = countdownSteps[countdownStage];
     }
 }
 
 function updateGameState(deltaTime) {
-    if (roundEnded) return;
+    if (gameFlow !== FLOW.PLAYING || roundEnded) return;
 
     if (!attackState && !boxerActions.reaction?.isRunning() && !keyStates['ShiftLeft']) {
         stamina += deltaTime * 5;
@@ -1212,12 +1408,15 @@ function updateGameState(deltaTime) {
     timeLeft -= deltaTime;
     if (timeLeft <= 0) {
         timeLeft = 0;
-        endRound('time');
+        finishRound();
     }
 
     if (comboTimer > 0) {
         comboTimer -= deltaTime;
-        if (comboTimer <= 0) combo = 0;
+        if (comboTimer <= 0) {
+            combo = 0;
+            comboHudPulse = 0;
+        }
     }
 
     updateHud();
@@ -1253,7 +1452,6 @@ gltfLoader.load(
         });
 
         scene.add(model);
-
         computeWorldInfo(model);
         worldOctree.fromGraphNode(model);
 
@@ -1261,7 +1459,7 @@ gltfLoader.load(
             octreeHelper = new OctreeHelper(worldOctree);
             octreeHelper.visible = params.showOctree;
             scene.add(octreeHelper);
-        } catch (e) {
+        } catch {
             octreeHelper = null;
         }
 
@@ -1282,15 +1480,21 @@ gltfLoader.load(
         }
 
         hitParticles = new HitParticleManager(scene);
+        impactFlashes = new ImpactFlashManager(scene);
+        trailManager = new TrailManager(scene);
+        comboFxManager = new ComboFxManager(camera, comboFxLayer);
 
         worldReady = true;
-        hideMessage();
         updateHud();
+        showIntro();
     },
     undefined,
     (error) => console.error('Error cargando ring.glb:', error)
 );
 
+// =========================
+// RESIZE
+// =========================
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -1307,6 +1511,8 @@ function animate() {
 
     if (worldReady) {
         const fullDelta = deltaTime * STEPS_PER_FRAME;
+
+        updateFlow(fullDelta);
 
         if (currentShake.duration > 0) {
             currentShake.duration -= fullDelta;
@@ -1327,6 +1533,11 @@ function animate() {
         }
 
         if (hitParticles) hitParticles.update(fullDelta);
+        if (impactFlashes) impactFlashes.update(fullDelta);
+        if (trailManager) trailManager.update(fullDelta);
+        if (comboFxManager) comboFxManager.update(fullDelta);
+
+        comboHudPulse *= Math.exp(-7.0 * fullDelta);
 
         for (let i = 0; i < STEPS_PER_FRAME; i++) {
             controls(deltaTime);
@@ -1334,11 +1545,14 @@ function animate() {
             teleportPlayerIfOob();
         }
 
-        updateAttack(fullDelta);
+        if (gameFlow === FLOW.PLAYING) {
+            updateAttack(fullDelta);
+            updateTargets(fullDelta);
+            updateGameState(fullDelta);
+        }
+
         updateBoxerTransform(fullDelta);
         updateAnimationState();
-        updateTargets(fullDelta);
-        updateGameState(fullDelta);
 
         if (boxerMixer) boxerMixer.update(fullDelta);
     }
@@ -1355,7 +1569,7 @@ function animate() {
 // GESTOR DE PARTÍCULAS DE IMPACTO
 // =========================================================
 class HitParticleManager {
-    constructor(scene, maxParticles = 140) {
+    constructor(scene, maxParticles = 260) {
         this.maxParticles = maxParticles;
         this.activeParticles = [];
 
@@ -1368,7 +1582,7 @@ class HitParticleManager {
         geometry.setDrawRange(0, 0);
 
         this.material = new THREE.PointsMaterial({
-            size: 0.17,
+            size: 0.14,
             vertexColors: true,
             blending: THREE.AdditiveBlending,
             transparent: true,
@@ -1382,21 +1596,28 @@ class HitParticleManager {
         scene.add(this.points);
     }
 
-    emit(point, direction, count = 8) {
+    emit(point, direction, count = 12, style = 'hit') {
         for (let i = 0; i < count; i++) {
-            const spread = 0.65;
+            const spread = style === 'heavy' ? 0.95 : 0.65;
+            const speed = style === 'heavy'
+                ? (Math.random() * 4.0 + 2.0)
+                : (Math.random() * 2.6 + 1.2);
 
             const velocity = direction.clone().add(new THREE.Vector3(
                 (Math.random() - 0.5) * spread,
-                Math.random() * 0.9 + 0.15,
+                Math.random() * 0.85,
                 (Math.random() - 0.5) * spread
-            )).normalize().multiplyScalar(Math.random() * 2.7 + 1.4);
+            )).normalize().multiplyScalar(speed);
+
+            const smokeChance = Math.random();
+            const life = 0.32 + Math.random() * 0.35;
 
             this.activeParticles.push({
                 position: point.clone(),
                 velocity,
-                life: 0.45 + Math.random() * 0.35,
-                maxLife: 0.45 + Math.random() * 0.35
+                life,
+                maxLife: life,
+                type: smokeChance > 0.72 ? 'smoke' : 'spark'
             });
 
             if (this.activeParticles.length > this.maxParticles) {
@@ -1420,8 +1641,14 @@ class HitParticleManager {
                 continue;
             }
 
-            p.velocity.y -= 8.0 * deltaTime;
-            p.velocity.multiplyScalar(Math.exp(-3.0 * deltaTime));
+            if (p.type === 'spark') {
+                p.velocity.y -= 8.5 * deltaTime;
+                p.velocity.multiplyScalar(Math.exp(-3.5 * deltaTime));
+            } else {
+                p.velocity.y += 0.6 * deltaTime;
+                p.velocity.multiplyScalar(Math.exp(-1.8 * deltaTime));
+            }
+
             p.position.addScaledVector(p.velocity, deltaTime);
 
             const life01 = p.life / p.maxLife;
@@ -1430,9 +1657,15 @@ class HitParticleManager {
             positions[aliveCount * 3 + 1] = p.position.y;
             positions[aliveCount * 3 + 2] = p.position.z;
 
-            colors[aliveCount * 3] = 1.0;
-            colors[aliveCount * 3 + 1] = 0.45 + 0.45 * life01;
-            colors[aliveCount * 3 + 2] = 0.06 + 0.12 * life01;
+            if (p.type === 'spark') {
+                colors[aliveCount * 3] = 1.0;
+                colors[aliveCount * 3 + 1] = 0.5 + 0.4 * life01;
+                colors[aliveCount * 3 + 2] = 0.08;
+            } else {
+                colors[aliveCount * 3] = 0.5 * life01;
+                colors[aliveCount * 3 + 1] = 0.5 * life01;
+                colors[aliveCount * 3 + 2] = 0.5 * life01;
+            }
 
             aliveCount++;
         }
@@ -1450,7 +1683,307 @@ class HitParticleManager {
         this.points.geometry.setDrawRange(0, aliveCount);
         this.points.geometry.attributes.position.needsUpdate = true;
         this.points.geometry.attributes.color.needsUpdate = true;
+    }
+}
 
-        this.material.opacity = aliveCount > 0 ? 1 : 0;
+// =========================================================
+// FLASH AL IMPACTO
+// =========================================================
+class ImpactFlashManager {
+    constructor(scene, maxFlashes = 24) {
+        this.scene = scene;
+        this.maxFlashes = maxFlashes;
+        this.flashes = [];
+    }
+
+    spawn(position, strength = 1) {
+        const geo = new THREE.SphereGeometry(0.08 * strength, 12, 12);
+        const mat = new THREE.MeshBasicMaterial({
+            color: 0xfff1b3,
+            transparent: true,
+            opacity: 1,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.copy(position);
+        this.scene.add(mesh);
+
+        this.flashes.push({
+            mesh,
+            life: 0.10,
+            maxLife: 0.10,
+            strength
+        });
+
+        if (this.flashes.length > this.maxFlashes) {
+            const old = this.flashes.shift();
+            this.scene.remove(old.mesh);
+            old.mesh.geometry.dispose();
+            old.mesh.material.dispose();
+        }
+    }
+
+    update(deltaTime) {
+        for (let i = this.flashes.length - 1; i >= 0; i--) {
+            const f = this.flashes[i];
+            f.life -= deltaTime;
+
+            if (f.life <= 0) {
+                this.scene.remove(f.mesh);
+                f.mesh.geometry.dispose();
+                f.mesh.material.dispose();
+                this.flashes.splice(i, 1);
+                continue;
+            }
+
+            const k = f.life / f.maxLife;
+            const grow = 1 + (1 - k) * 2.4 * f.strength;
+
+            f.mesh.scale.setScalar(grow);
+            f.mesh.material.opacity = k;
+        }
+    }
+}
+
+// =========================================================
+// TRAILS DE GOLPE
+// =========================================================
+class TrailManager {
+    constructor(scene, maxPoints = 80) {
+        this.scene = scene;
+        this.maxPoints = maxPoints;
+        this.trails = [];
+
+        this.material = new THREE.MeshBasicMaterial({
+            color: 0xffd86b,
+            transparent: true,
+            opacity: 0.75,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide
+        });
+    }
+
+    spawnTrail(start, end) {
+        const dir = new THREE.Vector3().subVectors(end, start);
+        const len = dir.length();
+        if (len < 0.001) return;
+
+        const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+
+        const geometry = new THREE.PlaneGeometry(len, 0.16);
+        const mesh = new THREE.Mesh(geometry, this.material.clone());
+
+        mesh.position.copy(mid);
+        mesh.lookAt(end);
+        mesh.rotateY(Math.PI / 2);
+
+        const upTilt = Math.random() * 0.5 - 0.25;
+        mesh.rotateZ(upTilt);
+
+        this.scene.add(mesh);
+
+        this.trails.push({
+            mesh,
+            life: 0.12,
+            maxLife: 0.12
+        });
+
+        if (this.trails.length > this.maxPoints) {
+            const old = this.trails.shift();
+            this.scene.remove(old.mesh);
+            old.mesh.geometry.dispose();
+            old.mesh.material.dispose();
+        }
+    }
+
+    update(deltaTime) {
+        for (let i = this.trails.length - 1; i >= 0; i--) {
+            const t = this.trails[i];
+            t.life -= deltaTime;
+
+            if (t.life <= 0) {
+                this.scene.remove(t.mesh);
+                t.mesh.geometry.dispose();
+                t.mesh.material.dispose();
+                this.trails.splice(i, 1);
+                continue;
+            }
+
+            const k = t.life / t.maxLife;
+            t.mesh.material.opacity = 0.75 * k;
+            t.mesh.scale.y = 0.7 + (1.0 - k) * 0.8;
+            t.mesh.scale.x = 1.0 + (1.0 - k) * 0.25;
+        }
+    }
+}
+
+// =========================================================
+// FLOATING TEXTS Y BANNER DE COMBO
+// =========================================================
+class ComboFxManager {
+    constructor(cameraRef, layer) {
+        this.camera = cameraRef;
+        this.layer = layer;
+        this.worldTexts = [];
+        this.banners = [];
+    }
+
+    worldToScreen(worldPos) {
+        const p = worldPos.clone().project(this.camera);
+        return {
+            x: (p.x * 0.5 + 0.5) * window.innerWidth,
+            y: (-p.y * 0.5 + 0.5) * window.innerHeight,
+            visible: p.z >= -1 && p.z <= 1
+        };
+    }
+
+    createTextElement(text, classType = 'score') {
+        const el = document.createElement('div');
+        el.textContent = text;
+        el.style.position = 'absolute';
+        el.style.left = '0px';
+        el.style.top = '0px';
+        el.style.transform = 'translate(-50%, -50%)';
+        el.style.fontFamily = 'Arial, sans-serif';
+        el.style.fontWeight = '900';
+        el.style.letterSpacing = '1px';
+        el.style.whiteSpace = 'nowrap';
+        el.style.pointerEvents = 'none';
+        el.style.userSelect = 'none';
+        el.style.textShadow = '0 2px 10px rgba(0,0,0,0.55)';
+        el.style.filter = 'drop-shadow(0 0 10px rgba(255,255,255,0.15))';
+
+        if (classType === 'score') {
+            el.style.fontSize = '26px';
+            el.style.color = '#ffd86b';
+        } else if (classType === 'attack') {
+            el.style.fontSize = '22px';
+            el.style.color = '#ffffff';
+        } else if (classType === 'combo') {
+            el.style.fontSize = '42px';
+            el.style.color = '#fff3b0';
+        }
+
+        this.layer.appendChild(el);
+        return el;
+    }
+
+    spawnWorldText(worldPos, text, options = {}) {
+        const el = this.createTextElement(text, options.type || 'score');
+
+        this.worldTexts.push({
+            el,
+            worldPos: worldPos.clone(),
+            velocity: new THREE.Vector3(
+                (Math.random() - 0.5) * 0.3,
+                0.9 + Math.random() * 0.5,
+                (Math.random() - 0.5) * 0.3
+            ),
+            life: options.life ?? 0.7,
+            maxLife: options.life ?? 0.7,
+            scale: options.scale ?? 1
+        });
+    }
+
+    spawnComboBanner(comboValue) {
+        if (comboValue < 2) return;
+
+        let text = `COMBO x${comboValue}`;
+        if (comboValue >= 10) text = `MONSTER COMBO x${comboValue}`;
+        else if (comboValue >= 7) text = `INSANE COMBO x${comboValue}`;
+        else if (comboValue >= 5) text = `MEGA COMBO x${comboValue}`;
+        else if (comboValue >= 3) text = `NICE COMBO x${comboValue}`;
+
+        const el = this.createTextElement(text, 'combo');
+        el.style.left = '50%';
+        el.style.top = '24%';
+        el.style.transform = 'translate(-50%, -50%) scale(0.7)';
+        el.style.opacity = '1';
+        el.style.color = comboValue >= 5 ? '#ffd54a' : '#ffffff';
+        el.style.textShadow = comboValue >= 5
+            ? '0 0 22px rgba(255,200,60,0.8), 0 4px 18px rgba(0,0,0,0.7)'
+            : '0 2px 10px rgba(0,0,0,0.55)';
+
+        this.banners.push({
+            el,
+            life: 0.8,
+            maxLife: 0.8
+        });
+    }
+
+    onHit(worldPos, comboValue, scoreValue, attackName) {
+        this.spawnWorldText(worldPos.clone().add(new THREE.Vector3(0, 0.35, 0)), `+${scoreValue}`, {
+            type: 'score',
+            life: 0.8,
+            scale: 1
+        });
+
+        this.spawnWorldText(worldPos.clone().add(new THREE.Vector3(0, 0.7, 0)), attackName.toUpperCase(), {
+            type: 'attack',
+            life: 0.6,
+            scale: 0.92
+        });
+
+        if (comboValue >= 2) {
+            this.spawnComboBanner(comboValue);
+        }
+    }
+
+    update(deltaTime) {
+        for (let i = this.worldTexts.length - 1; i >= 0; i--) {
+            const t = this.worldTexts[i];
+            t.life -= deltaTime;
+
+            if (t.life <= 0) {
+                t.el.remove();
+                this.worldTexts.splice(i, 1);
+                continue;
+            }
+
+            t.worldPos.addScaledVector(t.velocity, deltaTime);
+            t.velocity.y += 0.3 * deltaTime;
+
+            const k = t.life / t.maxLife;
+            const screen = this.worldToScreen(t.worldPos);
+
+            if (!screen.visible) {
+                t.el.style.display = 'none';
+                continue;
+            }
+
+            t.el.style.display = 'block';
+            t.el.style.left = `${screen.x}px`;
+            t.el.style.top = `${screen.y}px`;
+            t.el.style.opacity = `${k}`;
+            t.el.style.transform = `translate(-50%, -50%) scale(${0.8 + (1 - k) * 0.35 + t.scale * 0.15})`;
+        }
+
+        for (let i = this.banners.length - 1; i >= 0; i--) {
+            const b = this.banners[i];
+            b.life -= deltaTime;
+
+            if (b.life <= 0) {
+                b.el.remove();
+                this.banners.splice(i, 1);
+                continue;
+            }
+
+            const k = b.life / b.maxLife;
+            const intro = 1 - Math.min(1, b.life / (b.maxLife * 0.35));
+            const scale = 0.7 + intro * 0.45;
+
+            b.el.style.opacity = `${k}`;
+            b.el.style.transform = `translate(-50%, -50%) scale(${scale})`;
+        }
+    }
+
+    clear() {
+        for (const t of this.worldTexts) t.el.remove();
+        for (const b of this.banners) b.el.remove();
+        this.worldTexts.length = 0;
+        this.banners.length = 0;
     }
 }
