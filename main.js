@@ -124,9 +124,11 @@ container.appendChild(renderer.domElement);
 // =========================
 const stats = new Stats();
 stats.dom.style.position = 'absolute';
-stats.dom.style.top = '0px';
-stats.dom.style.left = '0px';
-stats.dom.style.zIndex = '999';
+// Cambia estas líneas:
+stats.dom.style.bottom = '60px'; // Lo separa del footer
+stats.dom.style.top = 'auto';    // Desactiva el anclaje superior
+stats.dom.style.left = '18px';
+stats.dom.style.zIndex = '1200'; // Lo sube para que no quede detrás de nada
 document.body.appendChild(stats.dom);
 
 // =========================

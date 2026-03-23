@@ -595,20 +595,19 @@ body {
    LIL GUI
 ========================= */
 .lil-gui {
-    --background-color: rgba(20, 20, 25, 0.94);
-    --text-color: #f2f2f2;
-    --title-background-color: #8b0000;
-    --title-text-color: #fff;
-    --widget-color: #1f1f28;
-    --hover-color: #2c2c38;
-    --focus-color: #e6c15a;
+    /* ... variables ... */
     z-index: 1200 !important;
-    margin-top: 104px !important;
+    margin-top: 180px !important; /* Aumentado de 104px a 180px para librar el HUD */
     margin-right: 18px !important;
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+    /* ... resto de tu css ... */
 }
+
+/* En tu media query de móviles (@media max-width: 700px): */
+    .lil-gui {
+        margin-top: 190px !important; /* Aumentar también en móvil */
+        margin-right: 8px !important;
+        max-width: calc(100vw - 16px);
+    }
 
 /* =========================
    RESPONSIVE
