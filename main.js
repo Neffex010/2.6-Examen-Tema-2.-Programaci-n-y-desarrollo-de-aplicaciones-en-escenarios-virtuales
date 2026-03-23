@@ -131,6 +131,19 @@ audioLoader.load('./audios/sfx/golpe_d.mp3', (buffer) => {
     golpeDerechoAudio.setBuffer(buffer);
     golpeDerechoAudio.setVolume(0.85); // Le subimos un poco si quieres que suene más fuerte que el jab
 });
+// 4. Sonido de la Q (Uppercut)
+const golpeQAudio = new THREE.Audio(audioListener);
+audioLoader.load('./audios/sfx/golpe_q.mp3', (buffer) => {
+    golpeQAudio.setBuffer(buffer);
+    golpeQAudio.setVolume(0.9); // Un poco más alto por ser un golpe pesado
+});
+
+// 5. Sonido de la F (Hook)
+const golpeFAudio = new THREE.Audio(audioListener);
+audioLoader.load('./audios/sfx/golpe_f.mp3', (buffer) => {
+    golpeFAudio.setBuffer(buffer);
+    golpeFAudio.setVolume(0.9);
+});
 // =========================
 // RENDERER
 // =========================
@@ -152,9 +165,10 @@ container.appendChild(renderer.domElement);
 // =========================
 const stats = new Stats();
 stats.dom.style.position = 'absolute';
-stats.dom.style.top = '0px';
-stats.dom.style.left = '0px';
-stats.dom.style.zIndex = '999';
+stats.dom.style.top = 'auto';       // Quitamos el anclaje superior
+stats.dom.style.bottom = '60px';    // Lo ponemos encima del footer
+stats.dom.style.left = '22px';      // Lo alineamos con el resto de la interfaz
+stats.dom.style.zIndex = '1200';
 document.body.appendChild(stats.dom);
 
 // =========================
@@ -184,10 +198,10 @@ function ensureHudElement(id, text, top, left) {
     return el;
 }
 
-const scoreElement = ensureHudElement('score', 'Score: 0', 180, 18);
-const timeElement = ensureHudElement('time', 'Tiempo: 60', 232, 18);
-const comboElement = ensureHudElement('combo', 'Combo: x0', 284, 18);
-const staminaElement = ensureHudElement('stamina', 'Estamina: 100%', 336, 18);
+const scoreElement = ensureHudElement('score', 'Score: 0', 190, 22);
+const timeElement = ensureHudElement('time', 'Tiempo: 60', 242, 22);
+const comboElement = ensureHudElement('combo', 'Combo: x0', 294, 22);
+const staminaElement = ensureHudElement('stamina', 'Estamina: 100%', 346, 22);
 
 let comboFxLayer = document.getElementById('combo-fx-layer');
 if (!comboFxLayer) {
@@ -865,12 +879,19 @@ function startAttack(name) {
 
     stamina -= cfg.staminaCost;
     updateHud();
+   // REPRODUCIR SONIDO SEGÚN EL ATAQUE
     if (name === 'jab') {
-        if (jabAudio.isPlaying) jabAudio.stop(); // Lo detiene si ya estaba sonando
+        if (jabAudio.isPlaying) jabAudio.stop();
         jabAudio.play();
     } else if (name === 'punching') {
         if (golpeDerechoAudio.isPlaying) golpeDerechoAudio.stop();
         golpeDerechoAudio.play();
+    } else if (name === 'uppercut') { // Tecla Q
+        if (golpeQAudio.isPlaying) golpeQAudio.stop();
+        golpeQAudio.play();
+    } else if (name === 'hook') { // Tecla F
+        if (golpeFAudio.isPlaying) golpeFAudio.stop();
+        golpeFAudio.play();
     }
 
     attackState = {
