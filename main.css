@@ -11,18 +11,26 @@
     --bg-1: #09090d;
     --bg-2: #12121a;
     --bg-3: #1b1b27;
+
     --red-1: #650000;
     --red-2: #9b1111;
+
     --gold-1: #ffd86b;
     --gold-2: #e6c15a;
     --gold-3: #9f7b18;
+
     --blue-1: #163e7a;
+
     --white-1: #ffffff;
     --white-2: #e8e8ee;
+
     --text-soft: rgba(255, 255, 255, 0.72);
+
     --panel-dark: rgba(10, 10, 16, 0.82);
     --panel-mid: rgba(18, 18, 28, 0.9);
+
     --border-soft: rgba(255, 255, 255, 0.12);
+
     --shadow-1: 0 10px 28px rgba(0, 0, 0, 0.45);
     --shadow-2: 0 0 24px rgba(255, 216, 107, 0.12);
 }
@@ -101,7 +109,12 @@ body {
     border-radius: 20px;
     padding: 12px 18px;
     background:
-        linear-gradient(90deg, rgba(70,0,0,0.92) 0%, rgba(132,10,10,0.88) 42%, rgba(12,12,18,0.92) 100%);
+        linear-gradient(
+            90deg,
+            rgba(70,0,0,0.92) 0%,
+            rgba(132,10,10,0.88) 42%,
+            rgba(12,12,18,0.92) 100%
+        );
     border: 1px solid rgba(255, 216, 107, 0.28);
     box-shadow: var(--shadow-1);
     display: flex;
@@ -595,19 +608,21 @@ body {
    LIL GUI
 ========================= */
 .lil-gui {
-    /* ... variables ... */
-    z-index: 1200 !important;
-    margin-top: 180px !important; /* Aumentado de 104px a 180px para librar el HUD */
-    margin-right: 18px !important;
-    /* ... resto de tu css ... */
-}
+    --background-color: rgba(20, 20, 25, 0.94);
+    --text-color: #f2f2f2;
+    --title-background-color: #8b0000;
+    --title-text-color: #fff;
+    --widget-color: #1f1f28;
+    --hover-color: #2c2c38;
+    --focus-color: #e6c15a;
 
-/* En tu media query de móviles (@media max-width: 700px): */
-    .lil-gui {
-        margin-top: 190px !important; /* Aumentar también en móvil */
-        margin-right: 8px !important;
-        max-width: calc(100vw - 16px);
-    }
+    z-index: 1200 !important;
+    margin-top: 180px !important;
+    margin-right: 18px !important;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.45);
+}
 
 /* =========================
    RESPONSIVE
@@ -625,6 +640,10 @@ body {
 
     .controls-bar {
         width: calc(100vw - 28px);
+    }
+
+    .lil-gui {
+        margin-top: 188px !important;
     }
 }
 
@@ -665,6 +684,10 @@ body {
 
     .side-tag {
         display: none;
+    }
+
+    .lil-gui {
+        margin-top: 220px !important;
     }
 }
 
@@ -719,7 +742,7 @@ body {
     }
 
     .lil-gui {
-        margin-top: 136px !important;
+        margin-top: 230px !important;
         margin-right: 8px !important;
         max-width: calc(100vw - 16px);
     }

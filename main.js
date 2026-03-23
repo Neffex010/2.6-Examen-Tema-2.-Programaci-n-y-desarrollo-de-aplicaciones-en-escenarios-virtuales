@@ -8,7 +8,7 @@ import { Capsule } from 'three/addons/math/Capsule.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 
 // =========================
-// DOM UI NUEVO
+// DOM UI
 // =========================
 const startOverlay = document.getElementById('startOverlay');
 const countdownOverlay = document.getElementById('countdownOverlay');
@@ -25,14 +25,11 @@ const finalHitsEl = document.getElementById('finalHits');
 const finalTiredEl = document.getElementById('finalTired');
 const finalMessageEl = document.getElementById('finalMessage');
 
-// =========================
-// TEMPORIZADOR
-// =========================
 const timer = new THREE.Timer();
 timer.connect(document);
 
 // =========================
-// CONFIGURACIÓN MAESTRA DEL JUEGO
+// CONFIG
 // =========================
 const GAME_CONFIG = {
     physics: {
@@ -64,13 +61,16 @@ const GAME_CONFIG = {
         A: 400,
         S: 550,
         SS: 700
+    },
+    storage: {
+        bestScoreKey: 'box_training_best_score'
     }
 };
 
 const STEPS_PER_FRAME = GAME_CONFIG.physics.stepsPerFrame;
 
 // =========================
-// ESTADOS DE FLUJO
+// FLOW
 // =========================
 const FLOW = {
     LOADING: 'loading',
@@ -102,9 +102,37 @@ const camera = new THREE.PerspectiveCamera(
     1000
 );
 camera.rotation.order = 'YXZ';
+const audioListener = new THREE.AudioListener();
+camera.add(audioListener);
 
 // =========================
-// CONTENEDOR / RENDERER
+// AUDIO
+// =========================
+const audioLoader = new THREE.AudioLoader();
+
+// 1. Sonido de Ambiente
+const ambienteAudio = new THREE.Audio(audioListener);
+audioLoader.load('./audios/bgm/ambiente.mp3', (buffer) => {
+    ambienteAudio.setBuffer(buffer);
+    ambienteAudio.setLoop(true); // Para que se repita infinitamente
+    ambienteAudio.setVolume(0.4); // Ajusta el volumen (0.0 a 1.0)
+});
+
+// 2. Sonido del Golpe Izquierdo (Jab)
+const jabAudio = new THREE.Audio(audioListener);
+audioLoader.load('./audios/sfx/golpe_i.mp3', (buffer) => {
+    jabAudio.setBuffer(buffer);
+    jabAudio.setVolume(0.8);
+});
+
+// 3. Sonido del Golpe Derecho (Punching / Clic Derecho)
+const golpeDerechoAudio = new THREE.Audio(audioListener);
+audioLoader.load('./audios/sfx/golpe_d.mp3', (buffer) => {
+    golpeDerechoAudio.setBuffer(buffer);
+    golpeDerechoAudio.setVolume(0.85); // Le subimos un poco si quieres que suene más fuerte que el jab
+});
+// =========================
+// RENDERER
 // =========================
 const container = document.getElementById('container') || document.body;
 
@@ -124,15 +152,13 @@ container.appendChild(renderer.domElement);
 // =========================
 const stats = new Stats();
 stats.dom.style.position = 'absolute';
-// Cambia estas líneas:
-stats.dom.style.bottom = '60px'; // Lo separa del footer
-stats.dom.style.top = 'auto';    // Desactiva el anclaje superior
-stats.dom.style.left = '18px';
-stats.dom.style.zIndex = '1200'; // Lo sube para que no quede detrás de nada
+stats.dom.style.top = '0px';
+stats.dom.style.left = '0px';
+stats.dom.style.zIndex = '999';
 document.body.appendChild(stats.dom);
 
 // =========================
-// HUD AUTOMÁTICO
+// HUD DYNAMIC
 // =========================
 function ensureHudElement(id, text, top, left) {
     let el = document.getElementById(id);
@@ -158,10 +184,10 @@ function ensureHudElement(id, text, top, left) {
     return el;
 }
 
-const scoreElement = ensureHudElement('score', 'Score: 0', 86, 18);
-const timeElement = ensureHudElement('time', 'Tiempo: 60', 138, 18);
-const comboElement = ensureHudElement('combo', 'Combo: x0', 190, 18);
-const staminaElement = ensureHudElement('stamina', 'Estamina: 100%', 242, 18);
+const scoreElement = ensureHudElement('score', 'Score: 0', 180, 18);
+const timeElement = ensureHudElement('time', 'Tiempo: 60', 232, 18);
+const comboElement = ensureHudElement('combo', 'Combo: x0', 284, 18);
+const staminaElement = ensureHudElement('stamina', 'Estamina: 100%', 336, 18);
 
 let comboFxLayer = document.getElementById('combo-fx-layer');
 if (!comboFxLayer) {
@@ -178,7 +204,7 @@ if (!comboFxLayer) {
 }
 
 // =========================
-// LUCES
+// LIGHTS
 // =========================
 const hemiLight = new THREE.HemisphereLight(0xe6eef7, 0x5a4b3d, 1.45);
 scene.add(hemiLight);
@@ -202,7 +228,7 @@ fillLight.position.set(8, 10, -8);
 scene.add(fillLight);
 
 // =========================
-// SUELO AUXILIAR
+// GROUND
 // =========================
 const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(250, 250),
@@ -217,7 +243,7 @@ ground.receiveShadow = true;
 scene.add(ground);
 
 // =========================
-// PARÁMETROS AJUSTABLES
+// PARAMS
 // =========================
 const params = {
     exposure: 1.0,
@@ -230,7 +256,7 @@ const params = {
 };
 
 // =========================
-// INFO DEL MUNDO
+// WORLD INFO
 // =========================
 const worldInfo = {
     center: new THREE.Vector3(),
@@ -250,7 +276,7 @@ let octreeHelper = null;
 let worldReady = false;
 
 // =========================
-// JUGADOR
+// PLAYER
 // =========================
 const PLAYER_RADIUS = 0.34;
 const PLAYER_HEIGHT = 1.75;
@@ -265,7 +291,7 @@ const playerVelocity = new THREE.Vector3();
 let playerOnFloor = false;
 
 // =========================
-// PERSONAJE MIXAMO
+// CHARACTER
 // =========================
 const fbxLoader = new FBXLoader();
 const gltfLoader = new GLTFLoader().setPath('./models/gltf/');
@@ -280,7 +306,7 @@ const boxerVisualHeight = 1.45;
 const boxerGroundAdjust = -0.35;
 
 // =========================
-// CONTROLES
+// CONTROLS
 // =========================
 const keyStates = {};
 let pointerLocked = false;
@@ -289,7 +315,7 @@ let yaw = 0;
 let pitch = -0.12;
 
 // =========================
-// VECTORES AUXILIARES
+// AUX VECTORS
 // =========================
 const vector1 = new THREE.Vector3();
 const vector2 = new THREE.Vector3();
@@ -310,7 +336,7 @@ const tempSize = new THREE.Vector3();
 const tempCenter = new THREE.Vector3();
 
 // =========================
-// JUEGO Y COMBATE
+// GAMEPLAY
 // =========================
 let score = 0;
 let combo = 0;
@@ -324,16 +350,19 @@ let comboHudPulse = 0;
 let tiredCount = 0;
 let hitsConnected = 0;
 let roundEnded = false;
+let bestScore = Number(localStorage.getItem(GAME_CONFIG.storage.bestScoreKey) || 0);
+let isNewRecord = false;
 
 const ATTACK_CONFIG = {
     jab:      { name: 'jab',      duration: 0.90, activeStart: 0.20, activeEnd: 0.40, range: 0.75, radius: 0.35, score: 20, impulse: 5.5, speed: 1.0, staminaCost: 8 },
     hook:     { name: 'hook',     duration: 1.20, activeStart: 0.35, activeEnd: 0.55, range: 0.70, radius: 0.45, score: 30, impulse: 9.5, speed: 0.95, staminaCost: 15 },
     uppercut: { name: 'uppercut', duration: 1.40, activeStart: 0.40, activeEnd: 0.65, range: 0.65, radius: 0.40, score: 40, impulse: 14.0, speed: 0.9, staminaCost: 25 },
-    punching: { name: 'punching', duration: 1.30, activeStart: 0.25, activeEnd: 0.60, range: 1.20, radius: 0.45, score: 25, impulse: 8.5, speed: 0.85, staminaCost: 18 }
+    punching: { name: 'punching', duration: 1.30, activeStart: 0.25, activeEnd: 0.60, range: 1.20, radius: 0.45, score: 25, impulse: 8.5, speed: 0.85, staminaCost: 18 },
+    cross:    { name: 'cross',    duration: 1.10, activeStart: 0.30, activeEnd: 0.50, range: 0.85, radius: 0.40, score: 35, impulse: 11.0, speed: 1.0, staminaCost: 20 }
 };
 
 // =========================
-// OBJETOS DE ENTRENAMIENTO
+// TARGETS
 // =========================
 const targetObjects = [];
 const bagGroup = new THREE.Group();
@@ -341,7 +370,7 @@ scene.add(bagGroup);
 let nextTargetId = 1;
 
 // =========================
-// EFECTOS VISUALES Y CÁMARA
+// FX / CAMERA
 // =========================
 const currentShake = {
     intensity: 0,
@@ -363,7 +392,7 @@ function triggerCameraShake(intensity, duration) {
 }
 
 // =========================
-// UI
+// UI HELPERS
 // =========================
 function getRankFromScore(value) {
     if (value >= GAME_CONFIG.scoreRanks.SS) return 'SS';
@@ -373,12 +402,67 @@ function getRankFromScore(value) {
     return 'C';
 }
 
+function getRankVisual(rank) {
+    if (rank === 'SS') {
+        return {
+            color: '#fff4b0',
+            textShadow: '0 0 28px rgba(255,230,120,0.95), 0 0 60px rgba(255,200,60,0.45)',
+            bg: 'linear-gradient(135deg, rgba(90,62,0,0.28), rgba(255,210,70,0.10))',
+            border: '1px solid rgba(255,220,120,0.45)'
+        };
+    }
+    if (rank === 'S') {
+        return {
+            color: '#ffd86b',
+            textShadow: '0 0 24px rgba(255,216,107,0.9), 0 0 44px rgba(255,170,40,0.35)',
+            bg: 'linear-gradient(135deg, rgba(70,40,0,0.22), rgba(255,216,107,0.08))',
+            border: '1px solid rgba(255,216,107,0.38)'
+        };
+    }
+    if (rank === 'A') {
+        return {
+            color: '#7fd6ff',
+            textShadow: '0 0 18px rgba(127,214,255,0.7)',
+            bg: 'linear-gradient(135deg, rgba(0,40,70,0.22), rgba(127,214,255,0.08))',
+            border: '1px solid rgba(127,214,255,0.3)'
+        };
+    }
+    if (rank === 'B') {
+        return {
+            color: '#c8e2ff',
+            textShadow: '0 0 12px rgba(200,226,255,0.35)',
+            bg: 'linear-gradient(135deg, rgba(20,30,50,0.22), rgba(200,226,255,0.06))',
+            border: '1px solid rgba(200,226,255,0.2)'
+        };
+    }
+    return {
+        color: '#ffffff',
+        textShadow: '0 0 10px rgba(255,255,255,0.15)',
+        bg: 'linear-gradient(135deg, rgba(35,35,40,0.18), rgba(255,255,255,0.04))',
+        border: '1px solid rgba(255,255,255,0.12)'
+    };
+}
+
 function getResultMessage(rank) {
     if (rank === 'SS') return 'Dominaste el entrenamiento. Nivel élite.';
     if (rank === 'S') return 'Excelente round. Tus combinaciones estuvieron brutales.';
     if (rank === 'A') return 'Muy buen desempeño. Ya se siente sólido.';
     if (rank === 'B') return 'Buen trabajo. Vas por buen camino.';
     return 'Sigue entrenando. Todavía puedes mejorar mucho más.';
+}
+
+function applyRankVisual(rank) {
+    if (!finalRankEl) return;
+    const visual = getRankVisual(rank);
+    finalRankEl.style.color = visual.color;
+    finalRankEl.style.textShadow = visual.textShadow;
+
+    const rankBox = finalRankEl.closest('.results-rank');
+    if (rankBox) {
+        rankBox.style.background = visual.bg;
+        rankBox.style.border = visual.border;
+        rankBox.style.boxShadow = `0 0 28px rgba(0,0,0,0.18)`;
+    }
 }
 
 function updateHud() {
@@ -422,7 +506,7 @@ function updateHud() {
     }
 
     if (hudGoal) hudGoal.textContent = 'Haz el mayor score posible en 60 segundos';
-    if (hudRankGoal) hudRankGoal.textContent = 'B:250 / A:400 / S:550 / SS:700';
+    if (hudRankGoal) hudRankGoal.textContent = `B:250 / A:400 / S:550 / SS:700 / Best:${bestScore}`;
 }
 
 function showIntro() {
@@ -437,7 +521,14 @@ function startCountdown() {
     gameFlow = FLOW.COUNTDOWN;
     countdownStage = 0;
     countdownTimer = 1.0;
-    if (countdownNumber) countdownNumber.textContent = countdownSteps[countdownStage];
+    if (!ambienteAudio.isPlaying) {
+        ambienteAudio.play();
+    }
+    if (countdownNumber) {
+        countdownNumber.textContent = countdownSteps[countdownStage];
+        countdownNumber.style.color = '#fff3c8';
+        countdownNumber.style.textShadow = '0 0 25px rgba(255,216,107,0.45), 0 4px 18px rgba(0,0,0,0.5)';
+    }
     startOverlay?.classList.add('is-hidden');
     resultsOverlay?.classList.add('is-hidden');
     countdownOverlay?.classList.remove('is-hidden');
@@ -455,14 +546,27 @@ function beginRound() {
 function showResults() {
     const rank = getRankFromScore(score);
 
+    if (score > bestScore) {
+        bestScore = score;
+        localStorage.setItem(GAME_CONFIG.storage.bestScoreKey, String(bestScore));
+        isNewRecord = true;
+    } else {
+        isNewRecord = false;
+    }
+
     if (finalRankEl) finalRankEl.textContent = rank;
-    if (finalScoreEl) finalScoreEl.textContent = `${score}`;
+    if (finalScoreEl) finalScoreEl.textContent = `${score}${isNewRecord ? '  •  NUEVO RÉCORD' : ''}`;
     if (finalComboEl) finalComboEl.textContent = `${maxCombo}`;
     if (finalHitsEl) finalHitsEl.textContent = `${hitsConnected}`;
     if (finalTiredEl) finalTiredEl.textContent = `${tiredCount}`;
-    if (finalMessageEl) finalMessageEl.textContent = getResultMessage(rank);
 
+    if (finalMessageEl) {
+        finalMessageEl.textContent = `${getResultMessage(rank)} Mejor marca: ${bestScore}.`;
+    }
+
+    applyRankVisual(rank);
     resultsOverlay?.classList.remove('is-hidden');
+    updateHud();
 }
 
 function resetRoundStats() {
@@ -480,8 +584,9 @@ function resetRoundStats() {
     combatZoom = 0;
     targetCombatZoom = 0;
     roundEnded = false;
+    isNewRecord = false;
 
-    targetObjects.forEach(t => {
+    targetObjects.forEach((t) => {
         t.health = 200;
         t.swing.set(0, 0);
         t.swingVelocity.set(0, 0);
@@ -520,7 +625,7 @@ gui.add(params, 'showOctree').name('Mostrar octree').onChange((value) => {
 });
 
 // =========================
-// EVENTOS DE TECLADO Y MOUSE
+// EVENTS
 // =========================
 document.addEventListener('keydown', (event) => {
     if ([
@@ -557,7 +662,7 @@ document.addEventListener('keydown', (event) => {
 
     if (event.code === 'KeyF') startAttack('hook');
     if (event.code === 'KeyQ') startAttack('uppercut');
-    if (event.code === 'KeyE') triggerDodge();
+    if (event.code === 'KeyE') startAttack('cross');
 });
 
 document.addEventListener('keyup', (event) => {
@@ -620,7 +725,7 @@ function getSideVector() {
 }
 
 // =========================
-// ANIMACIONES Y ESTADOS
+// ANIMATION STATE
 // =========================
 function fadeToAction(name, duration = 0.2) {
     const nextAction = boxerActions[name];
@@ -709,7 +814,7 @@ function updateAnimationState() {
 }
 
 // =========================
-// ACCIONES DEFENSIVAS
+// DEFENSE
 // =========================
 function triggerDodge() {
     if (!playerOnFloor || stamina < 5) return;
@@ -745,7 +850,7 @@ function triggerBagHit() {
 }
 
 // =========================
-// ATAQUES Y COLISIONES
+// ATTACKS
 // =========================
 function startAttack(name) {
     if (attackState || isTired || !ATTACK_CONFIG[name]) return;
@@ -760,6 +865,13 @@ function startAttack(name) {
 
     stamina -= cfg.staminaCost;
     updateHud();
+    if (name === 'jab') {
+        if (jabAudio.isPlaying) jabAudio.stop(); // Lo detiene si ya estaba sonando
+        jabAudio.play();
+    } else if (name === 'punching') {
+        if (golpeDerechoAudio.isPlaying) golpeDerechoAudio.stop();
+        golpeDerechoAudio.play();
+    }
 
     attackState = {
         name: cfg.name,
@@ -929,7 +1041,7 @@ function processAttackHits(cfg, hitTargets) {
 }
 
 // =========================
-// CARGAR BOXEADOR Y ANIMACIONES
+// LOAD CHARACTER
 // =========================
 async function loadBoxer() {
     const model = await fbxLoader.loadAsync('./models/fbx/character.fbx');
@@ -965,7 +1077,8 @@ async function loadBoxer() {
         uppercut: './models/fbx/Uppercut.fbx',
         punching: './models/fbx/Punching.fbx',
         dodging: './models/fbx/Dodging.fbx',
-        reaction: './models/fbx/Reaction.fbx'
+        reaction: './models/fbx/Reaction.fbx',
+        cross: './models/fbx/cross.fbx'
     };
 
     const entries = Object.entries(animFiles);
@@ -997,7 +1110,7 @@ async function loadBoxer() {
 }
 
 // =========================
-// COSTAL
+// BAG
 // =========================
 async function createPunchingBag(x, z) {
     return new Promise((resolve, reject) => {
@@ -1127,7 +1240,7 @@ function updateTargets(deltaTime) {
 }
 
 // =========================
-// COLISIONES JUGADOR
+// COLLISIONS
 // =========================
 function playerCollisions() {
     const result = worldOctree.capsuleIntersect(playerCollider);
@@ -1374,7 +1487,7 @@ function computeWorldInfo(root) {
 }
 
 // =========================
-// GAME STATE
+// FLOW UPDATE
 // =========================
 function updateFlow(deltaTime) {
     if (gameFlow !== FLOW.COUNTDOWN) return;
@@ -1390,7 +1503,14 @@ function updateFlow(deltaTime) {
         }
 
         countdownTimer = countdownStage === countdownSteps.length - 1 ? 0.65 : 1.0;
-        if (countdownNumber) countdownNumber.textContent = countdownSteps[countdownStage];
+
+        if (countdownNumber) {
+            countdownNumber.textContent = countdownSteps[countdownStage];
+            if (countdownSteps[countdownStage] === 'FIGHT') {
+                countdownNumber.style.color = '#ffd86b';
+                countdownNumber.style.textShadow = '0 0 32px rgba(255,216,107,0.85), 0 0 60px rgba(255,120,0,0.35)';
+            }
+        }
     }
 }
 
@@ -1425,7 +1545,7 @@ function updateGameState(deltaTime) {
 }
 
 // =========================
-// CARGAR RING
+// LOAD WORLD
 // =========================
 gltfLoader.load(
     'ring.glb',
@@ -1504,7 +1624,7 @@ window.addEventListener('resize', () => {
 });
 
 // =========================
-// ANIMACIÓN PRINCIPAL
+// MAIN LOOP
 // =========================
 function animate() {
     timer.update();
@@ -1568,10 +1688,10 @@ function animate() {
 }
 
 // =========================================================
-// GESTOR DE PARTÍCULAS DE IMPACTO
+// PARTICLES
 // =========================================================
 class HitParticleManager {
-    constructor(scene, maxParticles = 260) {
+    constructor(sceneRef, maxParticles = 260) {
         this.maxParticles = maxParticles;
         this.activeParticles = [];
 
@@ -1595,7 +1715,7 @@ class HitParticleManager {
 
         this.points = new THREE.Points(geometry, this.material);
         this.points.frustumCulled = false;
-        scene.add(this.points);
+        sceneRef.add(this.points);
     }
 
     emit(point, direction, count = 12, style = 'hit') {
@@ -1689,11 +1809,11 @@ class HitParticleManager {
 }
 
 // =========================================================
-// FLASH AL IMPACTO
+// IMPACT FLASH
 // =========================================================
 class ImpactFlashManager {
-    constructor(scene, maxFlashes = 24) {
-        this.scene = scene;
+    constructor(sceneRef, maxFlashes = 24) {
+        this.scene = sceneRef;
         this.maxFlashes = maxFlashes;
         this.flashes = [];
     }
@@ -1750,11 +1870,11 @@ class ImpactFlashManager {
 }
 
 // =========================================================
-// TRAILS DE GOLPE
+// TRAILS
 // =========================================================
 class TrailManager {
-    constructor(scene, maxPoints = 80) {
-        this.scene = scene;
+    constructor(sceneRef, maxPoints = 80) {
+        this.scene = sceneRef;
         this.maxPoints = maxPoints;
         this.trails = [];
 
@@ -1823,7 +1943,7 @@ class TrailManager {
 }
 
 // =========================================================
-// FLOATING TEXTS Y BANNER DE COMBO
+// COMBO FX
 // =========================================================
 class ComboFxManager {
     constructor(cameraRef, layer) {
