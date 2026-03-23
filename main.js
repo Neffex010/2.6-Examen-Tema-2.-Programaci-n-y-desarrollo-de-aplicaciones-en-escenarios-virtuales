@@ -114,8 +114,8 @@ const audioLoader = new THREE.AudioLoader();
 const ambienteAudio = new THREE.Audio(audioListener);
 audioLoader.load('./audios/bgm/ambiente.mp3', (buffer) => {
     ambienteAudio.setBuffer(buffer);
-    ambienteAudio.setLoop(true); // Para que se repita infinitamente
-    ambienteAudio.setVolume(0.4); // Ajusta el volumen (0.0 a 1.0)
+    ambienteAudio.setLoop(true);
+    ambienteAudio.setVolume(0.4);
 });
 
 // 2. Sonido del Golpe Izquierdo (Jab)
@@ -129,13 +129,14 @@ audioLoader.load('./audios/sfx/golpe_i.mp3', (buffer) => {
 const golpeDerechoAudio = new THREE.Audio(audioListener);
 audioLoader.load('./audios/sfx/golpe_d.mp3', (buffer) => {
     golpeDerechoAudio.setBuffer(buffer);
-    golpeDerechoAudio.setVolume(0.85); // Le subimos un poco si quieres que suene más fuerte que el jab
+    golpeDerechoAudio.setVolume(0.85);
 });
+
 // 4. Sonido de la Q (Uppercut)
 const golpeQAudio = new THREE.Audio(audioListener);
 audioLoader.load('./audios/sfx/golpe_q.mp3', (buffer) => {
     golpeQAudio.setBuffer(buffer);
-    golpeQAudio.setVolume(0.9); // Un poco más alto por ser un golpe pesado
+    golpeQAudio.setVolume(0.9);
 });
 
 // 5. Sonido de la F (Hook)
@@ -144,6 +145,7 @@ audioLoader.load('./audios/sfx/golpe_f.mp3', (buffer) => {
     golpeFAudio.setBuffer(buffer);
     golpeFAudio.setVolume(0.9);
 });
+
 // =========================
 // RENDERER
 // =========================
@@ -165,9 +167,9 @@ container.appendChild(renderer.domElement);
 // =========================
 const stats = new Stats();
 stats.dom.style.position = 'absolute';
-stats.dom.style.top = 'auto';       // Quitamos el anclaje superior
-stats.dom.style.bottom = '60px';    // Lo ponemos encima del footer
-stats.dom.style.left = '22px';      // Lo alineamos con el resto de la interfaz
+stats.dom.style.top = 'auto';
+stats.dom.style.bottom = '60px';
+stats.dom.style.left = '22px';
 stats.dom.style.zIndex = '1200';
 document.body.appendChild(stats.dom);
 
@@ -366,13 +368,16 @@ let hitsConnected = 0;
 let roundEnded = false;
 let bestScore = Number(localStorage.getItem(GAME_CONFIG.storage.bestScoreKey) || 0);
 let isNewRecord = false;
+let isFrenzy = false;
+const normalLightColor = new THREE.Color(0xffffff);
+const frenzyLightColor = new THREE.Color(0xff8866);
 
+// NUEVAS ANIMACIONES VELOCES
 const ATTACK_CONFIG = {
-    jab:      { name: 'jab',      duration: 0.90, activeStart: 0.20, activeEnd: 0.40, range: 0.75, radius: 0.35, score: 20, impulse: 5.5, speed: 1.0, staminaCost: 8 },
-    hook:     { name: 'hook',     duration: 1.20, activeStart: 0.35, activeEnd: 0.55, range: 0.70, radius: 0.45, score: 30, impulse: 9.5, speed: 0.95, staminaCost: 15 },
-    uppercut: { name: 'uppercut', duration: 1.40, activeStart: 0.40, activeEnd: 0.65, range: 0.65, radius: 0.40, score: 40, impulse: 14.0, speed: 0.9, staminaCost: 25 },
-    punching: { name: 'punching', duration: 1.30, activeStart: 0.25, activeEnd: 0.60, range: 1.20, radius: 0.45, score: 25, impulse: 8.5, speed: 0.85, staminaCost: 18 },
-    cross:    { name: 'cross',    duration: 1.10, activeStart: 0.30, activeEnd: 0.50, range: 0.85, radius: 0.40, score: 35, impulse: 11.0, speed: 1.0, staminaCost: 20 }
+    jab:      { name: 'jab',      duration: 0.55, activeStart: 0.15, activeEnd: 0.35, range: 0.75, radius: 0.35, score: 20, impulse: 6.5, speed: 1.50, staminaCost: 8 },
+    punching: { name: 'punching', duration: 0.75, activeStart: 0.20, activeEnd: 0.45, range: 1.20, radius: 0.45, score: 25, impulse: 9.5, speed: 1.35, staminaCost: 18 },
+    hook:     { name: 'hook',     duration: 0.85, activeStart: 0.25, activeEnd: 0.45, range: 0.70, radius: 0.45, score: 30, impulse: 11.5, speed: 1.25, staminaCost: 15 },
+    uppercut: { name: 'uppercut', duration: 0.95, activeStart: 0.30, activeEnd: 0.50, range: 0.65, radius: 0.40, score: 40, impulse: 16.0, speed: 1.15, staminaCost: 25 }
 };
 
 // =========================
@@ -599,6 +604,8 @@ function resetRoundStats() {
     targetCombatZoom = 0;
     roundEnded = false;
     isNewRecord = false;
+    isFrenzy = false;
+    directionalLight.color.copy(normalLightColor);
 
     targetObjects.forEach((t) => {
         t.health = 200;
@@ -676,7 +683,7 @@ document.addEventListener('keydown', (event) => {
 
     if (event.code === 'KeyF') startAttack('hook');
     if (event.code === 'KeyQ') startAttack('uppercut');
-    if (event.code === 'KeyE') startAttack('cross');
+    if (event.code === 'KeyE') triggerDodge(); // Restaurada la esquiva
 });
 
 document.addEventListener('keyup', (event) => {
@@ -879,20 +886,8 @@ function startAttack(name) {
 
     stamina -= cfg.staminaCost;
     updateHud();
-   // REPRODUCIR SONIDO SEGÚN EL ATAQUE
-    if (name === 'jab') {
-        if (jabAudio.isPlaying) jabAudio.stop();
-        jabAudio.play();
-    } else if (name === 'punching') {
-        if (golpeDerechoAudio.isPlaying) golpeDerechoAudio.stop();
-        golpeDerechoAudio.play();
-    } else if (name === 'uppercut') { // Tecla Q
-        if (golpeQAudio.isPlaying) golpeQAudio.stop();
-        golpeQAudio.play();
-    } else if (name === 'hook') { // Tecla F
-        if (golpeFAudio.isPlaying) golpeFAudio.stop();
-        golpeFAudio.play();
-    }
+
+    // El audio se quitó de aquí para pasarlo al momento exacto del impacto.
 
     attackState = {
         name: cfg.name,
@@ -990,8 +985,24 @@ function processAttackHits(cfg, hitTargets) {
             hitTargets.add(target.id);
             target.hitFlash = 0.16;
 
-            target.swingVelocity.x += attackForward.x * cfg.impulse * 0.12;
-            target.swingVelocity.y += attackForward.z * cfg.impulse * 0.12;
+            // --- REPRODUCIR AUDIO EXACTAMENTE AL IMPACTAR ---
+            if (cfg.name === 'jab') {
+                if (jabAudio.isPlaying) jabAudio.stop();
+                jabAudio.play();
+            } else if (cfg.name === 'punching') {
+                if (golpeDerechoAudio.isPlaying) golpeDerechoAudio.stop();
+                golpeDerechoAudio.play();
+            } else if (cfg.name === 'uppercut') {
+                if (golpeQAudio.isPlaying) golpeQAudio.stop();
+                golpeQAudio.play();
+            } else if (cfg.name === 'hook') {
+                if (golpeFAudio.isPlaying) golpeFAudio.stop();
+                golpeFAudio.play();
+            }
+
+            // AUMENTO DEL IMPULSO PARA MAYOR PESO DEL COSTAL (De 0.12 a 0.22)
+            target.swingVelocity.x += attackForward.x * cfg.impulse * 0.22;
+            target.swingVelocity.y += attackForward.z * cfg.impulse * 0.22;
 
             target.health -= (cfg.score * 0.35);
 
@@ -1098,8 +1109,7 @@ async function loadBoxer() {
         uppercut: './models/fbx/Uppercut.fbx',
         punching: './models/fbx/Punching.fbx',
         dodging: './models/fbx/Dodging.fbx',
-        reaction: './models/fbx/Reaction.fbx',
-        cross: './models/fbx/cross.fbx'
+        reaction: './models/fbx/Reaction.fbx'
     };
 
     const entries = Object.entries(animFiles);
@@ -1216,7 +1226,8 @@ function updateTargets(deltaTime) {
         if (target.type === 'bag') {
             target.swingVelocity.x += (-target.swing.x * 20.0) * deltaTime;
             target.swingVelocity.y += (-target.swing.y * 20.0) * deltaTime;
-            target.swingVelocity.multiplyScalar(Math.exp(-3.5 * deltaTime));
+            const currentFriction = isFrenzy ? 1.2 : 3.5; 
+            target.swingVelocity.multiplyScalar(Math.exp(-currentFriction * deltaTime));
 
             target.swing.x += target.swingVelocity.x * deltaTime;
             target.swing.y += target.swingVelocity.y * deltaTime;
@@ -1250,6 +1261,11 @@ function updateTargets(deltaTime) {
                         !boxerActions.reaction?.isRunning()
                     ) {
                         triggerBagHit();
+                        const dist = Math.sqrt(distSq);
+                        const pushForce = isFrenzy ? 45 : 15;
+                        playerVelocity.x += (dx / dist) * pushForce;
+                        playerVelocity.z += (dz / dist) * pushForce;
+
                         target.swingVelocity.multiplyScalar(-0.2);
                     }
                 }
@@ -1391,7 +1407,7 @@ function updatePlayer(deltaTime) {
     const horizontalSpeed = Math.sqrt(playerVelocity.x * playerVelocity.x + playerVelocity.z * playerVelocity.z);
     const maxHorizontal = GAME_CONFIG.physics.maxSpeed;
 
-    if (horizontalSpeed > maxHorizontal) {
+    if (horizontalSpeed > maxHorizontal && !boxerActions.reaction?.isRunning()) {
         const scale = maxHorizontal / horizontalSpeed;
         playerVelocity.x *= scale;
         playerVelocity.z *= scale;
@@ -1549,6 +1565,15 @@ function updateGameState(deltaTime) {
     }
 
     timeLeft -= deltaTime;
+
+    if (timeLeft <= 15 && timeLeft > 0 && !roundEnded) {
+        isFrenzy = true;
+        directionalLight.color.lerp(frenzyLightColor, deltaTime * 2);
+    } else {
+        isFrenzy = false;
+        directionalLight.color.lerp(normalLightColor, deltaTime * 2);
+    }
+
     if (timeLeft <= 0) {
         timeLeft = 0;
         finishRound();
