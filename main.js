@@ -19,19 +19,20 @@ timer.connect(document);
 const GAME_CONFIG = {
     physics: {
         gravity: 30,
-        maxSpeed: 10.5,
+        maxSpeed: 15.5,
         stepsPerFrame: 5
     },
     movement: {
-        walkSpeed: 12,
-        runSpeed: 19,
-        airWalkSpeed: 5,
-        airRunSpeed: 7,
+        walkSpeed: 8.5,
+        runSpeed: 13.5,
+        airWalkSpeed: 4.5,
+        airRunSpeed: 6.5,
         jumpForce: 9.5,
-        turnSpeed: 12 
+        turnSpeed: 12
     },
     camera: {
-        followSpeed: 12 
+        followSpeed: 12,
+        collisionRadius: 0.22
     },
     round: {
         duration: 60
@@ -114,7 +115,7 @@ function ensureHudElement(id, text, top, left) {
 const scoreElement = ensureHudElement('score', 'Score: 0', 86, 18);
 const timeElement = ensureHudElement('time', 'Tiempo: 60', 138, 18);
 const comboElement = ensureHudElement('combo', 'Combo: x0', 190, 18);
-const healthElement = ensureHudElement('health', 'Vida: 100', 242, 18);
+const staminaElement = ensureHudElement('stamina', 'Estamina: 100%', 242, 18);
 
 let messageElement = document.getElementById('message');
 if (!messageElement) {
@@ -259,22 +260,27 @@ const vector1 = new THREE.Vector3();
 const vector2 = new THREE.Vector3();
 const vector3 = new THREE.Vector3();
 const vector4 = new THREE.Vector3();
+const vector5 = new THREE.Vector3();
+const vector6 = new THREE.Vector3();
+
 const forwardVector = new THREE.Vector3();
 const sideVector = new THREE.Vector3();
 const headPosition = new THREE.Vector3();
 const cameraTarget = new THREE.Vector3();
 const desiredCameraPos = new THREE.Vector3();
+const resolvedCameraPos = new THREE.Vector3();
 
 const tempBox = new THREE.Box3();
 const tempSize = new THREE.Vector3();
 const tempCenter = new THREE.Vector3();
 
 // =========================
-// JUEGO Y COMBATE
+// JUEGO Y COMBATE (ESTAMINA)
 // =========================
 let score = 0;
 let combo = 0;
-let health = 100;
+let stamina = 100;
+let isTired = false;
 let timeLeft = GAME_CONFIG.round.duration;
 let roundEnded = false;
 let comboTimer = 0;
@@ -282,10 +288,10 @@ let comboTimer = 0;
 let attackState = null;
 
 const ATTACK_CONFIG = {
-    jab:      { duration: 0.90, activeStart: 0.20, activeEnd: 0.40, range: 0.75, radius: 0.35, score: 20, impulse: 5.5, speed: 1.0 },
-    hook:     { duration: 1.20, activeStart: 0.35, activeEnd: 0.55, range: 0.70, radius: 0.45, score: 30, impulse: 9.5, speed: 0.95 },
-    uppercut: { duration: 1.40, activeStart: 0.40, activeEnd: 0.65, range: 0.65, radius: 0.40, score: 40, impulse: 14.0, speed: 0.9 },
-    punching: { duration: 1.30, activeStart: 0.25, activeEnd: 0.60, range: 1.20, radius: 0.45, score: 25, impulse: 8.5, speed: 0.85 }
+    jab:      { name: 'jab',      duration: 0.90, activeStart: 0.20, activeEnd: 0.40, range: 0.75, radius: 0.35, score: 20, impulse: 5.5, speed: 1.0, staminaCost: 8 },
+    hook:     { name: 'hook',     duration: 1.20, activeStart: 0.35, activeEnd: 0.55, range: 0.70, radius: 0.45, score: 30, impulse: 9.5, speed: 0.95, staminaCost: 15 },
+    uppercut: { name: 'uppercut', duration: 1.40, activeStart: 0.40, activeEnd: 0.65, range: 0.65, radius: 0.40, score: 40, impulse: 14.0, speed: 0.9, staminaCost: 25 },
+    punching: { name: 'punching', duration: 1.30, activeStart: 0.25, activeEnd: 0.60, range: 1.20, radius: 0.45, score: 25, impulse: 8.5, speed: 0.85, staminaCost: 18 }
 };
 
 // =========================
@@ -301,13 +307,36 @@ scene.add(bagGroup);
 let nextTargetId = 1;
 
 // =========================
+// EFECTOS VISUALES Y CÁMARA
+// =========================
+const currentShake = {
+    intensity: 0,
+    duration: 0,
+    offset: new THREE.Vector3()
+};
+
+let hitParticles = null;
+
+function triggerCameraShake(intensity, duration) {
+    currentShake.intensity = Math.max(currentShake.intensity, intensity);
+    currentShake.duration = Math.max(currentShake.duration, duration);
+}
+
+// =========================
 // UI
 // =========================
 function updateHud() {
     scoreElement.textContent = `Score: ${score}`;
     timeElement.textContent = `Tiempo: ${Math.max(0, Math.ceil(timeLeft))}`;
     comboElement.textContent = `Combo: x${combo}`;
-    healthElement.textContent = `Vida: ${Math.max(0, Math.ceil(health))}`;
+
+    if (isTired) {
+        staminaElement.style.color = '#ff4444';
+        staminaElement.textContent = `¡AGOTADO! Levanta guardia (${Math.max(0, Math.ceil(stamina))}%)`;
+    } else {
+        staminaElement.style.color = '#fff';
+        staminaElement.textContent = `Estamina: ${Math.max(0, Math.ceil(stamina))}%`;
+    }
 }
 
 function showMessage(text) {
@@ -332,7 +361,9 @@ gui.add(params, 'fogFar', 20, 160, 1).name('Niebla fin').onChange((v) => scene.f
 gui.add(params, 'cameraDistance', 2.5, 8.0, 0.1).name('Distancia cámara');
 gui.add(params, 'cameraHeight', 0.6, 3.5, 0.1).name('Altura cámara');
 gui.add(params, 'bagScale', 0.3, 2.0, 0.05).name('Escala costal');
-gui.add(params, 'showOctree').name('Mostrar octree').onChange((value) => { if (octreeHelper) octreeHelper.visible = value; });
+gui.add(params, 'showOctree').name('Mostrar octree').onChange((value) => {
+    if (octreeHelper) octreeHelper.visible = value;
+});
 
 // =========================
 // EVENTOS DE TECLADO Y MOUSE
@@ -346,54 +377,65 @@ document.addEventListener('keydown', (event) => {
         event.preventDefault();
     }
 
-    if (event.repeat) return; 
+    if (event.repeat) return;
 
     keyStates[event.code] = true;
 
-    if (event.code === 'ArrowUp') { params.cameraDistance = Math.max(1.5, params.cameraDistance - 0.5); gui.controllersRecursive().forEach(c => c.updateDisplay()); }
-    if (event.code === 'ArrowDown') { params.cameraDistance = Math.min(8.0, params.cameraDistance + 0.5); gui.controllersRecursive().forEach(c => c.updateDisplay()); }
+    if (event.code === 'ArrowUp') {
+        params.cameraDistance = Math.max(1.5, params.cameraDistance - 0.5);
+        gui.controllersRecursive().forEach(c => c.updateDisplay());
+    }
+
+    if (event.code === 'ArrowDown') {
+        params.cameraDistance = Math.min(8.0, params.cameraDistance + 0.5);
+        gui.controllersRecursive().forEach(c => c.updateDisplay());
+    }
 
     if (event.code === 'KeyR' && roundEnded) {
         score = 0;
         combo = 0;
-        health = 100;
+        stamina = 100;
+        isTired = false;
         timeLeft = GAME_CONFIG.round.duration;
         roundEnded = false;
         isVictorious = false;
-        
+        attackState = null;
+
         setPlayerSpawn();
-        // Al reiniciar, restablecemos el péndulo 3D
-        targetObjects.forEach(t => { t.health = 200; t.swing.set(0,0); t.swingVelocity.set(0,0); t.hitFlash = 0; });
-        
+
+        targetObjects.forEach(t => {
+            t.health = 200;
+            t.swing.set(0, 0);
+            t.swingVelocity.set(0, 0);
+            t.hitFlash = 0;
+        });
+
         hideMessage();
         updateHud();
         fadeToAction('Idle', 0.2);
         return;
     }
 
-    if (!worldReady || roundEnded) return;
-
+    if (!worldReady || roundEnded || isTired) return;
     if (keyStates['Space'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
-    if (event.code === 'KeyF') startAttack('hook');      
-    if (event.code === 'KeyQ') startAttack('uppercut');  
-    
-    if (event.code === 'KeyE') triggerDodge();           
+    if (event.code === 'KeyF') startAttack('hook');
+    if (event.code === 'KeyQ') startAttack('uppercut');
+    if (event.code === 'KeyE') triggerDodge();
 });
 
 document.addEventListener('keyup', (event) => {
     keyStates[event.code] = false;
 });
 
-// ATAQUES POR CLIC DE MOUSE
 document.addEventListener('mousedown', (event) => {
-    if (!pointerLocked || !worldReady || roundEnded) return;
+    if (!pointerLocked || !worldReady || roundEnded || isTired) return;
     if (keyStates['Space'] || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
     if (event.button === 0) {
-        startAttack('jab'); 
+        startAttack('jab');
     } else if (event.button === 2) {
-        startAttack('punching'); 
+        startAttack('punching');
     }
 });
 
@@ -417,8 +459,15 @@ document.addEventListener('mousemove', (event) => {
     pitch = Math.max(-limit, Math.min(limit, pitch));
 });
 
-function getForwardVector() { forwardVector.set(Math.sin(yaw), 0, Math.cos(yaw)).normalize(); return forwardVector; }
-function getSideVector() { sideVector.set(Math.cos(yaw), 0, -Math.sin(yaw)).normalize(); return sideVector; }
+function getForwardVector() {
+    forwardVector.set(Math.sin(yaw), 0, Math.cos(yaw)).normalize();
+    return forwardVector;
+}
+
+function getSideVector() {
+    sideVector.set(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
+    return sideVector;
+}
 
 // =========================
 // ANIMACIONES Y ESTADOS
@@ -426,11 +475,18 @@ function getSideVector() { sideVector.set(Math.cos(yaw), 0, -Math.sin(yaw)).norm
 function fadeToAction(name, duration = 0.2) {
     const nextAction = boxerActions[name];
     if (!nextAction || activeAction === nextAction) return;
+
     const previousAction = activeAction;
     activeAction = nextAction;
+
     if (previousAction) previousAction.fadeOut(duration);
-    
-    activeAction.reset().setEffectiveTimeScale(1.0).setEffectiveWeight(1).fadeIn(duration).play();
+
+    activeAction
+        .reset()
+        .setEffectiveTimeScale(1.0)
+        .setEffectiveWeight(1)
+        .fadeIn(duration)
+        .play();
 }
 
 function playOneShot(name, fadeIn = 0.08, fadeOut = 0.2, speed = 1.0) {
@@ -439,7 +495,7 @@ function playOneShot(name, fadeIn = 0.08, fadeOut = 0.2, speed = 1.0) {
 
     action.reset();
     action.enabled = true;
-    action.setEffectiveTimeScale(speed); 
+    action.setEffectiveTimeScale(speed);
     action.setLoop(THREE.LoopOnce, 1);
     action.clampWhenFinished = true;
     action.fadeIn(fadeIn);
@@ -448,7 +504,7 @@ function playOneShot(name, fadeIn = 0.08, fadeOut = 0.2, speed = 1.0) {
     const onFinished = (e) => {
         if (e.action !== action) return;
         boxerMixer.removeEventListener('finished', onFinished);
-        if (!attackState && !isVictorious) fadeToAction('Idle', fadeOut);
+        if (!attackState && !isVictorious && !isTired) fadeToAction('Idle', fadeOut);
     };
 
     boxerMixer.addEventListener('finished', onFinished);
@@ -472,12 +528,29 @@ function updateBoxerTransform(deltaTime) {
 
 function updateAnimationState() {
     if (!boxerMixer) return;
-    
-    if (isVictorious || attackState || boxerActions.dodging?.isRunning() || boxerActions.reaction?.isRunning()) return;
+
+    if (boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning() || isVictorious) return;
+
+    if (isTired) {
+        if (attackState) attackState = null;
+
+        if (boxerActions.block) {
+            boxerActions.block.setEffectiveTimeScale(0.7);
+        }
+
+        fadeToAction('block', 0.3);
+        return;
+    }
+
+    if (boxerActions.block) {
+        boxerActions.block.setEffectiveTimeScale(1.0);
+    }
+
+    if (attackState) return;
 
     if (keyStates['Space'] && playerOnFloor) {
         fadeToAction('block', 0.15);
-        return; 
+        return;
     }
 
     const horizontalSpeed = Math.sqrt(playerVelocity.x * playerVelocity.x + playerVelocity.z * playerVelocity.z);
@@ -487,9 +560,9 @@ function updateAnimationState() {
         return;
     }
 
-    if (horizontalSpeed > 4.8 && keyStates['ShiftLeft']) {
+    if (horizontalSpeed > 6.2 && keyStates['ShiftLeft']) {
         fadeToAction('run', 0.15);
-    } else if (horizontalSpeed > 0.15) {
+    } else if (horizontalSpeed > 0.18) {
         fadeToAction('walk', 0.15);
     } else {
         fadeToAction('Idle', 0.2);
@@ -500,38 +573,66 @@ function updateAnimationState() {
 // ACCIONES DEFENSIVAS
 // =========================
 function triggerDodge() {
-    if (!playerOnFloor) return;
+    if (!playerOnFloor || stamina < 5) return;
+
+    stamina -= 5;
+    if (stamina < 0) stamina = 0;
+
+    updateHud();
     playOneShot('dodging', 0.10, 0.25, 0.85);
 }
 
-function triggerReaction() {
-    if (isVictorious || roundEnded) return;
-    
+function triggerBagHit() {
+    if (isVictorious || roundEnded || isTired) return;
+
     attackState = null;
     playOneShot('reaction', 0.05, 0.2, 1.1);
-    
-    health -= 10;
+
+    combo = 0;
+    comboTimer = 0;
+    stamina -= 20;
+
+    if (stamina <= 0) {
+        stamina = 0;
+        isTired = true;
+    }
+
     updateHud();
+    triggerCameraShake(0.12, 0.3);
 }
 
 // =========================
 // ATAQUES Y COLISIONES
 // =========================
 function startAttack(name) {
-    if (attackState || !ATTACK_CONFIG[name]) return;
+    if (attackState || isTired || !ATTACK_CONFIG[name]) return;
     const cfg = ATTACK_CONFIG[name];
 
+    if (stamina < cfg.staminaCost) {
+        stamina = 0;
+        isTired = true;
+        updateHud();
+        return;
+    }
+
+    stamina -= cfg.staminaCost;
+    updateHud();
+
     attackState = {
-        name, timer: 0, duration: cfg.duration,
-        activeStart: cfg.activeStart, activeEnd: cfg.activeEnd,
+        name: cfg.name,
+        timer: 0,
+        duration: cfg.duration,
+        activeStart: cfg.activeStart,
+        activeEnd: cfg.activeEnd,
         hitTargets: new Set()
     };
-    
+
     playOneShot(name, 0.05, 0.2, cfg.speed);
 }
 
 function updateAttack(deltaTime) {
     if (!attackState || roundEnded) return;
+
     attackState.timer += deltaTime;
     const cfg = ATTACK_CONFIG[attackState.name];
 
@@ -558,9 +659,9 @@ function processAttackHits(cfg, hitTargets) {
         if (hitTargets.has(target.id)) continue;
 
         const toTarget = vector4.copy(target.position).sub(playerCenter);
-        toTarget.y = 0; 
+        toTarget.y = 0;
         const dist = toTarget.length();
-        
+
         if (dist > cfg.range + cfg.radius) continue;
 
         if (dist > 0.0001) {
@@ -568,22 +669,26 @@ function processAttackHits(cfg, hitTargets) {
             if (toTarget.dot(attackForward) < 0.15) continue;
         }
 
-        const hitDistSq = Math.pow(target.position.x - attackPoint.x, 2) + Math.pow(target.position.z - attackPoint.z, 2);
+        const hitDistSq =
+            Math.pow(target.position.x - attackPoint.x, 2) +
+            Math.pow(target.position.z - attackPoint.z, 2);
+
         const strikeRadius = cfg.radius + target.radius;
 
         if (hitDistSq <= (strikeRadius * strikeRadius)) {
             hitTargets.add(target.id);
             target.hitFlash = 0.16;
-            
-            // TRANSFERIR LA FUERZA AL PÉNDULO EN 3D
+
             target.swingVelocity.x += attackForward.x * cfg.impulse * 0.12;
-            target.swingVelocity.y += attackForward.z * cfg.impulse * 0.12; // La 'y' del swing mapea a la 'z' del mundo
-            
+            target.swingVelocity.y += attackForward.z * cfg.impulse * 0.12;
+
             target.health -= (cfg.score * 0.35);
 
             combo += 1;
             comboTimer = 2.3;
             score += cfg.score + Math.max(0, combo - 1) * 5;
+
+            stamina = Math.min(100, stamina + 2);
 
             if (target.health <= 0) {
                 target.health = 200;
@@ -591,7 +696,35 @@ function processAttackHits(cfg, hitTargets) {
                 combo += 1;
                 comboTimer = 2.8;
             }
+
             updateHud();
+
+            const vectorToBagSurface = toTarget.clone().normalize();
+            const exactImpactPoint = target.position.clone().sub(
+                vectorToBagSurface.multiplyScalar(target.radius)
+            );
+
+            exactImpactPoint.y = Math.min(
+                playerCollider.end.y - 0.2,
+                target.position.y + target.bagHeight / 2
+            );
+
+            if (hitParticles) {
+                const reflectDir = attackForward
+                    .clone()
+                    .reflect(toTarget.clone().normalize())
+                    .negate()
+                    .add(new THREE.Vector3(0, 0.45, 0));
+
+                hitParticles.emit(exactImpactPoint, reflectDir, Math.max(6, Math.floor(cfg.score / 4)));
+            }
+
+            let shakeInt = 0;
+            if (cfg.name === 'jab') shakeInt = 0.05;
+            if (cfg.name === 'hook' || cfg.name === 'punching') shakeInt = 0.15;
+            if (cfg.name === 'uppercut') shakeInt = 0.25;
+
+            triggerCameraShake(shakeInt, 0.3);
         }
     }
 }
@@ -623,29 +756,46 @@ async function loadBoxer() {
     boxer = model;
     boxerMixer = new THREE.AnimationMixer(boxer);
 
-    const idleFbx  = await fbxLoader.loadAsync('./models/fbx/Idle.fbx');
-    const walkFbx  = await fbxLoader.loadAsync('./models/fbx/walk.fbx');
-    const runFbx   = await fbxLoader.loadAsync('./models/fbx/run.fbx');
-    const jabFbx   = await fbxLoader.loadAsync('./models/fbx/jab.fbx');
-    const hookFbx  = await fbxLoader.loadAsync('./models/fbx/hook.fbx');
-    const blockFbx = await fbxLoader.loadAsync('./models/fbx/block.fbx');
-    const uppercutFbx = await fbxLoader.loadAsync('./models/fbx/Uppercut.fbx');
-    const punchingFbx = await fbxLoader.loadAsync('./models/fbx/Punching.fbx');
-    const dodgingFbx  = await fbxLoader.loadAsync('./models/fbx/Dodging.fbx');
-    const reactionFbx = await fbxLoader.loadAsync('./models/fbx/Reaction.fbx');
-    const victoryFbx  = await fbxLoader.loadAsync('./models/fbx/Victory.fbx');
+    const animFiles = {
+        Idle: './models/fbx/Idle.fbx',
+        walk: './models/fbx/walk.fbx',
+        run: './models/fbx/run.fbx',
+        jab: './models/fbx/jab.fbx',
+        hook: './models/fbx/hook.fbx',
+        block: './models/fbx/block.fbx',
+        uppercut: './models/fbx/Uppercut.fbx',
+        punching: './models/fbx/Punching.fbx',
+        dodging: './models/fbx/Dodging.fbx',
+        reaction: './models/fbx/Reaction.fbx',
+        victory: './models/fbx/Victory.fbx'
+    };
 
-    boxerActions.Idle  = boxerMixer.clipAction(idleFbx.animations[0]);
-    boxerActions.walk  = boxerMixer.clipAction(walkFbx.animations[0]);
-    boxerActions.run   = boxerMixer.clipAction(runFbx.animations[0]);
-    boxerActions.jab   = boxerMixer.clipAction(jabFbx.animations[0]);
-    boxerActions.hook  = boxerMixer.clipAction(hookFbx.animations[0]);
-    boxerActions.block = boxerMixer.clipAction(blockFbx.animations[0]);
-    boxerActions.uppercut = boxerMixer.clipAction(uppercutFbx.animations[0]);
-    boxerActions.punching = boxerMixer.clipAction(punchingFbx.animations[0]);
-    boxerActions.dodging  = boxerMixer.clipAction(dodgingFbx.animations[0]);
-    boxerActions.reaction = boxerMixer.clipAction(reactionFbx.animations[0]);
-    boxerActions.victory  = boxerMixer.clipAction(victoryFbx.animations[0]);
+    const entries = Object.entries(animFiles);
+
+    const loadedAnimations = await Promise.all(
+        entries.map(async ([name, path]) => {
+            try {
+                const fbx = await fbxLoader.loadAsync(path);
+                if (!fbx.animations || !fbx.animations[0]) {
+                    console.warn(`Animación inválida o vacía: ${name} -> ${path}`);
+                    return [name, null];
+                }
+                return [name, fbx.animations[0]];
+            } catch (err) {
+                console.warn(`No se pudo cargar la animación "${name}" desde ${path}`, err);
+                return [name, null];
+            }
+        })
+    );
+
+    for (const [name, clip] of loadedAnimations) {
+        if (!clip) continue;
+        boxerActions[name] = boxerMixer.clipAction(clip);
+    }
+
+    if (!boxerActions.Idle) {
+        throw new Error('No se pudo cargar Idle.fbx. Esa animación es obligatoria.');
+    }
 
     boxerActions.Idle.play();
     activeAction = boxerActions.Idle;
@@ -654,7 +804,7 @@ async function loadBoxer() {
 }
 
 // =========================
-// COSTAL: FÍSICA DE PÉNDULO 3D 
+// COSTAL: FÍSICA DE PÉNDULO 3D
 // =========================
 async function createPunchingBag(x, z) {
     return new Promise((resolve, reject) => {
@@ -662,8 +812,12 @@ async function createPunchingBag(x, z) {
             'poly.glb',
             (gltf) => {
                 const bag = gltf.scene;
+
                 bag.traverse((child) => {
-                    if (child.isMesh) { child.castShadow = true; child.receiveShadow = true; }
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
                 });
 
                 bag.scale.setScalar(params.bagScale);
@@ -672,16 +826,15 @@ async function createPunchingBag(x, z) {
                 const box = new THREE.Box3().setFromObject(bag);
                 const size = new THREE.Vector3();
                 const center = new THREE.Vector3();
-                box.getSize(size); box.getCenter(center);
+                box.getSize(size);
+                box.getCenter(center);
 
-                // ALINEACIÓN: El punto más alto del costal (box.max.y) quedará anclado al centro de rotación (0,0,0)
                 bag.position.x -= center.x;
                 bag.position.z -= center.z;
-                bag.position.y -= box.max.y; 
+                bag.position.y -= box.max.y;
                 bag.updateMatrixWorld(true);
 
                 const pivot = new THREE.Group();
-                // AQUI LO LEVANTAMOS: Sumamos 0.85 a la altura para que flote mucho más arriba
                 pivot.position.set(x, worldInfo.floorY + size.y + 1, z);
                 pivot.add(bag);
 
@@ -690,27 +843,36 @@ async function createPunchingBag(x, z) {
                 const radius = Math.max(0.45, Math.max(size.x, size.z) * 0.45);
 
                 const target = {
-                    id: nextTargetId++, type: 'bag', group: pivot, mesh: bag, pivot: pivot,
-                    position: new THREE.Vector3().copy(pivot.position), 
+                    id: nextTargetId++,
+                    type: 'bag',
+                    group: pivot,
+                    mesh: bag,
+                    pivot,
+                    position: new THREE.Vector3().copy(pivot.position),
                     bagHeight: size.y,
-                    radius, health: 200, hitFlash: 0,
-                    swing: new THREE.Vector2(0, 0), // Oscilación 2D (X y Z global)
+                    radius,
+                    health: 200,
+                    hitFlash: 0,
+                    swing: new THREE.Vector2(0, 0),
                     swingVelocity: new THREE.Vector2(0, 0)
                 };
 
                 targetObjects.push(target);
                 resolve(target);
             },
-            undefined, (error) => reject(error)
+            undefined,
+            (error) => reject(error)
         );
     });
 }
 
 async function createBags() {
     while (bagGroup.children.length > 0) bagGroup.remove(bagGroup.children[0]);
+
     for (let i = targetObjects.length - 1; i >= 0; i--) {
         if (targetObjects[i].type === 'bag') targetObjects.splice(i, 1);
     }
+
     await createPunchingBag(0, -worldInfo.halfDepth * 0.15);
 }
 
@@ -726,44 +888,45 @@ function updateTargets(deltaTime) {
 
     for (const target of targetObjects) {
         if (target.type === 'bag') {
-            // LÓGICA DE PÉNDULO 3D
             target.swingVelocity.x += (-target.swing.x * 20.0) * deltaTime;
             target.swingVelocity.y += (-target.swing.y * 20.0) * deltaTime;
-            
-            // Fricción para que se detenga gradualmente
+
             target.swingVelocity.multiplyScalar(Math.exp(-3.5 * deltaTime));
-            
+
             target.swing.x += target.swingVelocity.x * deltaTime;
             target.swing.y += target.swingVelocity.y * deltaTime;
-            
+
             const swingMag = target.swing.length();
             if (swingMag > 0.8) target.swing.multiplyScalar(0.8 / swingMag);
 
-            // Mapear el Swing a la rotación 3D del pivot
             target.pivot.rotation.x = target.swing.y;
             target.pivot.rotation.z = -target.swing.x;
 
-            // Calcular la posición real de la "panza" del costal en el espacio 3D
+            target.pivot.updateMatrixWorld(true);
+
             tempLocalCenter.set(0, -target.bagHeight * 0.5, 0);
             tempWorldCenter.copy(tempLocalCenter).applyMatrix4(target.pivot.matrixWorld);
             target.position.copy(tempWorldCenter);
 
-            // LÓGICA DE DAÑO (El costal te golpea de regreso)
             const speedSq = target.swingVelocity.lengthSq();
-            if (speedSq > 0.5) { 
+            if (speedSq > 0.5) {
                 const dx = playerCenter.x - target.position.x;
                 const dz = playerCenter.z - target.position.z;
                 const distSq = (dx * dx) + (dz * dz);
-                
-                const hitRadius = target.radius + PLAYER_RADIUS + 0.2; 
-                
+
+                const hitRadius = target.radius + PLAYER_RADIUS + 0.2;
+
                 if (distSq < (hitRadius * hitRadius)) {
-                    // Verificar si el costal se mueve HACIA el jugador
                     const dotProduct = (dx * target.swingVelocity.x) + (dz * target.swingVelocity.y);
-                    
-                    if (dotProduct > 0.1 && !keyStates['Space'] && !boxerActions.dodging?.isRunning() && !boxerActions.reaction?.isRunning()) {
-                        triggerReaction();
-                        target.swingVelocity.multiplyScalar(-0.2); // El jugador absorbe el impacto y frena el costal
+
+                    if (
+                        dotProduct > 0.1 &&
+                        !keyStates['Space'] &&
+                        !boxerActions.dodging?.isRunning() &&
+                        !boxerActions.reaction?.isRunning()
+                    ) {
+                        triggerBagHit();
+                        target.swingVelocity.multiplyScalar(-0.2);
                     }
                 }
             }
@@ -782,8 +945,14 @@ function playerCollisions() {
 
     if (result) {
         playerOnFloor = result.normal.y > 0;
-        if (!playerOnFloor) playerVelocity.addScaledVector(result.normal, -result.normal.dot(playerVelocity));
-        if (result.depth >= 1e-10) playerCollider.translate(result.normal.multiplyScalar(result.depth));
+
+        if (!playerOnFloor) {
+            playerVelocity.addScaledVector(result.normal, -result.normal.dot(playerVelocity));
+        }
+
+        if (result.depth >= 1e-10) {
+            playerCollider.translate(result.normal.multiplyScalar(result.depth));
+        }
     }
 }
 
@@ -791,12 +960,16 @@ function controls(deltaTime) {
     if (roundEnded || isVictorious || boxerActions.reaction?.isRunning() || boxerActions.dodging?.isRunning()) return;
 
     const isBlocking = keyStates['Space'];
-    const running = keyStates['ShiftLeft'] && !isBlocking;
-    
-    let baseSpeed = running ? GAME_CONFIG.movement.runSpeed : (isBlocking ? 4 : GAME_CONFIG.movement.walkSpeed);
-    
+    const running = keyStates['ShiftLeft'] && !isBlocking && !isTired;
+
+    let baseSpeed = running
+        ? GAME_CONFIG.movement.runSpeed
+        : (isBlocking ? 3.8 : GAME_CONFIG.movement.walkSpeed);
+
     if (attackState) {
-        baseSpeed *= 0.05; 
+        baseSpeed *= 0.05;
+    } else if (isTired) {
+        baseSpeed *= 0.3;
     }
 
     const airSpeed = running ? GAME_CONFIG.movement.airRunSpeed : GAME_CONFIG.movement.airWalkSpeed;
@@ -806,16 +979,68 @@ function controls(deltaTime) {
     if (keyStates['KeyS']) playerVelocity.add(getForwardVector().multiplyScalar(-speedDelta));
     if (keyStates['KeyA']) playerVelocity.add(getSideVector().multiplyScalar(-speedDelta));
     if (keyStates['KeyD']) playerVelocity.add(getSideVector().multiplyScalar(speedDelta));
+
+    if (running && playerVelocity.lengthSq() > 1 && playerOnFloor) {
+        stamina -= deltaTime * 8;
+
+        if (stamina <= 0) {
+            stamina = 0;
+            isTired = true;
+        }
+
+        updateHud();
+    }
+}
+
+function resolveCameraCollision(from, desired) {
+    resolvedCameraPos.copy(desired);
+
+    if (!worldReady) return resolvedCameraPos;
+
+    const dir = vector5.copy(desired).sub(from);
+    const distance = dir.length();
+
+    if (distance < 0.001) return resolvedCameraPos;
+
+    dir.normalize();
+
+    const rayResult = worldOctree.rayIntersect(new THREE.Ray(from.clone(), dir));
+
+    if (rayResult && rayResult.distance < distance) {
+        const safeDistance = Math.max(0.1, rayResult.distance - GAME_CONFIG.camera.collisionRadius);
+        resolvedCameraPos.copy(from).addScaledVector(dir, safeDistance);
+    }
+
+    return resolvedCameraPos;
 }
 
 function updateThirdPersonCamera(deltaTime) {
     headPosition.copy(playerCollider.end);
-    const camDirection = vector2.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).normalize();
+
+    const camDirection = vector2.set(
+        Math.sin(yaw) * Math.cos(pitch),
+        Math.sin(pitch),
+        Math.cos(yaw) * Math.cos(pitch)
+    ).normalize();
 
     desiredCameraPos.copy(headPosition).addScaledVector(camDirection, -params.cameraDistance);
     desiredCameraPos.y += params.cameraHeight;
 
-    camera.position.lerp(desiredCameraPos, Math.min(1, GAME_CONFIG.camera.followSpeed * deltaTime));
+    const lookOrigin = vector6.copy(headPosition);
+    lookOrigin.y += 0.18;
+
+    resolveCameraCollision(lookOrigin, desiredCameraPos);
+
+    const smoothedPos = camera.position.clone();
+
+    if (currentShake.offset.lengthSq() > 0.0001) {
+        smoothedPos.sub(currentShake.offset);
+    }
+
+    smoothedPos.lerp(resolvedCameraPos, Math.min(1, GAME_CONFIG.camera.followSpeed * deltaTime));
+    smoothedPos.add(currentShake.offset);
+
+    camera.position.copy(smoothedPos);
 
     cameraTarget.copy(headPosition);
     cameraTarget.y += 0.25;
@@ -832,8 +1057,13 @@ function updatePlayer(deltaTime) {
 
     playerVelocity.addScaledVector(playerVelocity, damping);
 
-    if (playerVelocity.length() > GAME_CONFIG.physics.maxSpeed) {
-        playerVelocity.normalize().multiplyScalar(GAME_CONFIG.physics.maxSpeed);
+    const horizontalSpeed = Math.sqrt(playerVelocity.x * playerVelocity.x + playerVelocity.z * playerVelocity.z);
+    const maxHorizontal = GAME_CONFIG.physics.maxSpeed;
+
+    if (horizontalSpeed > maxHorizontal) {
+        const scale = maxHorizontal / horizontalSpeed;
+        playerVelocity.x *= scale;
+        playerVelocity.z *= scale;
     }
 
     const deltaPosition = vector3.copy(playerVelocity).multiplyScalar(deltaTime);
@@ -841,7 +1071,6 @@ function updatePlayer(deltaTime) {
 
     playerCollisions();
 
-    // Colisión matemática dinámica con el costal (Para no atravesarlo)
     const px = (playerCollider.start.x + playerCollider.end.x) * 0.5;
     const pz = (playerCollider.start.z + playerCollider.end.z) * 0.5;
 
@@ -849,10 +1078,10 @@ function updatePlayer(deltaTime) {
         const dx = px - target.position.x;
         const dz = pz - target.position.z;
         const distSq = (dx * dx) + (dz * dz);
-        const minDist = target.radius + PLAYER_RADIUS + 0.15; 
-        
+        const minDist = target.radius + PLAYER_RADIUS + 0.15;
+
         if (distSq < (minDist * minDist) && distSq > 0.0001) {
-            const dist = Math.sqrt(distSq); 
+            const dist = Math.sqrt(distSq);
             const overlap = minDist - dist;
             playerCollider.translate(new THREE.Vector3((dx / dist) * overlap, 0, (dz / dist) * overlap));
         }
@@ -888,18 +1117,21 @@ function keepPlayerInsideBounds() {
 function setPlayerSpawn() {
     const spawnX = worldInfo.center.x;
     const spawnZ = worldInfo.center.z + worldInfo.halfDepth * 0.35;
-    const spawnY = worldInfo.floorY + 2.0; 
+    const spawnY = worldInfo.floorY + 2.0;
 
     playerCollider.start.set(spawnX, spawnY, spawnZ);
     playerCollider.end.set(spawnX, spawnY + (PLAYER_HEIGHT - PLAYER_RADIUS), spawnZ);
     playerVelocity.set(0, 0, 0);
-    yaw = Math.PI; pitch = -0.12;
+
+    yaw = Math.PI;
+    pitch = -0.12;
 
     updateThirdPersonCamera(1);
 }
 
 function teleportPlayerIfOob() {
-    if (camera.position.y < worldInfo.floorY - 10) setPlayerSpawn();
+    const playerY = (playerCollider.start.y + playerCollider.end.y) * 0.5;
+    if (playerY < worldInfo.floorY - 10) setPlayerSpawn();
 }
 
 function fitModelToRing(root) {
@@ -935,7 +1167,7 @@ function computeWorldInfo(root) {
 
     const maxDim = Math.max(worldInfo.size.x, worldInfo.size.z, 10);
     scene.fog.far = Math.max(params.fogFar, maxDim * 4);
-    
+
     directionalLight.shadow.camera.left = -maxDim * 1.8;
     directionalLight.shadow.camera.right = maxDim * 1.8;
     directionalLight.shadow.camera.top = maxDim * 1.8;
@@ -945,36 +1177,36 @@ function computeWorldInfo(root) {
 }
 
 // =========================
-// RONDA Y KO
+// RONDA Y ESTADOS DE JUEGO
 // =========================
 function endRound(reason) {
     roundEnded = true;
     pointerLocked = false;
     document.exitPointerLock();
 
-    updateHud(); 
+    updateHud();
 
-    if (reason === 'ko') {
-        fadeToAction('reaction', 0.5); 
-        showMessage(`¡K.O.!\nEl costal te noqueó.\nScore: ${score}\n\nPresiona 'R' para reiniciar`);
+    if (score >= 250) {
+        isVictorious = true;
+        fadeToAction('victory', 0.5);
+        showMessage(`¡Victoria!\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
     } else {
-        if (score >= 250) {
-            isVictorious = true;
-            fadeToAction('victory', 0.5); 
-            showMessage(`¡Victoria!\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
-        } else {
-            showMessage(`Fin del round\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
-        }
+        fadeToAction('Idle', 0.5);
+        showMessage(`Fin del round\nScore final: ${score}\n\nPresiona 'R' para reiniciar`);
     }
 }
 
 function updateGameState(deltaTime) {
     if (roundEnded) return;
 
-    if (health <= 0) {
-        health = 0;
-        endRound('ko');
-        return;
+    if (!attackState && !boxerActions.reaction?.isRunning() && !keyStates['ShiftLeft']) {
+        stamina += deltaTime * 5;
+        if (stamina > 100) stamina = 100;
+    }
+
+    if (isTired && stamina >= 25) {
+        isTired = false;
+        if (!attackState) fadeToAction('Idle', 0.3);
     }
 
     timeLeft -= deltaTime;
@@ -1005,9 +1237,17 @@ gltfLoader.load(
             if (child.isMesh) {
                 child.castShadow = true;
                 child.receiveShadow = true;
+
                 if (child.material) {
-                    if (Array.isArray(child.material)) child.material.forEach(mat => { if ('side' in mat) mat.side = THREE.FrontSide; if (mat.map) mat.map.anisotropy = 4; });
-                    else { child.material.side = THREE.FrontSide; if (child.material.map) child.material.map.anisotropy = 4; }
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(mat => {
+                            if ('side' in mat) mat.side = THREE.FrontSide;
+                            if (mat.map) mat.map.anisotropy = 4;
+                        });
+                    } else {
+                        child.material.side = THREE.FrontSide;
+                        if (child.material.map) child.material.map.anisotropy = 4;
+                    }
                 }
             }
         });
@@ -1017,16 +1257,35 @@ gltfLoader.load(
         computeWorldInfo(model);
         worldOctree.fromGraphNode(model);
 
-        try { octreeHelper = new OctreeHelper(worldOctree); octreeHelper.visible = params.showOctree; scene.add(octreeHelper); } catch (e) { octreeHelper = null; }
+        try {
+            octreeHelper = new OctreeHelper(worldOctree);
+            octreeHelper.visible = params.showOctree;
+            scene.add(octreeHelper);
+        } catch (e) {
+            octreeHelper = null;
+        }
 
         setPlayerSpawn();
 
-        try { await createBags(); } catch (error) { console.error('Error cargando props:', error); }
+        try {
+            await createBags();
+        } catch (error) {
+            console.error('Error cargando props:', error);
+        }
 
-        try { await loadBoxer(); updateBoxerTransform(0); fadeToAction('Idle', 0.01); } catch (error) { console.error('Error cargando boxeador FBX:', error); }
+        try {
+            await loadBoxer();
+            updateBoxerTransform(0);
+            fadeToAction('Idle', 0.01);
+        } catch (error) {
+            console.error('Error cargando boxeador FBX:', error);
+        }
+
+        hitParticles = new HitParticleManager(scene);
 
         worldReady = true;
         hideMessage();
+        updateHud();
     },
     undefined,
     (error) => console.error('Error cargando ring.glb:', error)
@@ -1047,18 +1306,38 @@ function animate() {
     const deltaTime = Math.min(0.05, timer.getDelta()) / STEPS_PER_FRAME;
 
     if (worldReady) {
+        const fullDelta = deltaTime * STEPS_PER_FRAME;
+
+        if (currentShake.duration > 0) {
+            currentShake.duration -= fullDelta;
+
+            if (currentShake.duration <= 0) {
+                currentShake.duration = 0;
+                currentShake.intensity = 0;
+                currentShake.offset.set(0, 0, 0);
+            } else {
+                currentShake.intensity *= Math.exp(-5.0 * fullDelta);
+
+                currentShake.offset.set(
+                    (Math.random() - 0.5) * currentShake.intensity,
+                    (Math.random() - 0.5) * currentShake.intensity,
+                    (Math.random() - 0.5) * currentShake.intensity
+                );
+            }
+        }
+
+        if (hitParticles) hitParticles.update(fullDelta);
+
         for (let i = 0; i < STEPS_PER_FRAME; i++) {
             controls(deltaTime);
             updatePlayer(deltaTime);
             teleportPlayerIfOob();
         }
 
-        const fullDelta = deltaTime * STEPS_PER_FRAME;
-
         updateAttack(fullDelta);
         updateBoxerTransform(fullDelta);
         updateAnimationState();
-        updateTargets(fullDelta); 
+        updateTargets(fullDelta);
         updateGameState(fullDelta);
 
         if (boxerMixer) boxerMixer.update(fullDelta);
@@ -1070,4 +1349,108 @@ function animate() {
 
     renderer.render(scene, camera);
     stats.update();
+}
+
+// =========================================================
+// GESTOR DE PARTÍCULAS DE IMPACTO
+// =========================================================
+class HitParticleManager {
+    constructor(scene, maxParticles = 140) {
+        this.maxParticles = maxParticles;
+        this.activeParticles = [];
+
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(maxParticles * 3);
+        const colors = new Float32Array(maxParticles * 3);
+
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        geometry.setDrawRange(0, 0);
+
+        this.material = new THREE.PointsMaterial({
+            size: 0.17,
+            vertexColors: true,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+            opacity: 1,
+            depthWrite: false,
+            depthTest: true
+        });
+
+        this.points = new THREE.Points(geometry, this.material);
+        this.points.frustumCulled = false;
+        scene.add(this.points);
+    }
+
+    emit(point, direction, count = 8) {
+        for (let i = 0; i < count; i++) {
+            const spread = 0.65;
+
+            const velocity = direction.clone().add(new THREE.Vector3(
+                (Math.random() - 0.5) * spread,
+                Math.random() * 0.9 + 0.15,
+                (Math.random() - 0.5) * spread
+            )).normalize().multiplyScalar(Math.random() * 2.7 + 1.4);
+
+            this.activeParticles.push({
+                position: point.clone(),
+                velocity,
+                life: 0.45 + Math.random() * 0.35,
+                maxLife: 0.45 + Math.random() * 0.35
+            });
+
+            if (this.activeParticles.length > this.maxParticles) {
+                this.activeParticles.shift();
+            }
+        }
+    }
+
+    update(deltaTime) {
+        const positions = this.points.geometry.attributes.position.array;
+        const colors = this.points.geometry.attributes.color.array;
+
+        let aliveCount = 0;
+
+        for (let i = this.activeParticles.length - 1; i >= 0; i--) {
+            const p = this.activeParticles[i];
+
+            p.life -= deltaTime;
+            if (p.life <= 0) {
+                this.activeParticles.splice(i, 1);
+                continue;
+            }
+
+            p.velocity.y -= 8.0 * deltaTime;
+            p.velocity.multiplyScalar(Math.exp(-3.0 * deltaTime));
+            p.position.addScaledVector(p.velocity, deltaTime);
+
+            const life01 = p.life / p.maxLife;
+
+            positions[aliveCount * 3] = p.position.x;
+            positions[aliveCount * 3 + 1] = p.position.y;
+            positions[aliveCount * 3 + 2] = p.position.z;
+
+            colors[aliveCount * 3] = 1.0;
+            colors[aliveCount * 3 + 1] = 0.45 + 0.45 * life01;
+            colors[aliveCount * 3 + 2] = 0.06 + 0.12 * life01;
+
+            aliveCount++;
+        }
+
+        for (let i = aliveCount; i < this.maxParticles; i++) {
+            positions[i * 3] = 0;
+            positions[i * 3 + 1] = -9999;
+            positions[i * 3 + 2] = 0;
+
+            colors[i * 3] = 0;
+            colors[i * 3 + 1] = 0;
+            colors[i * 3 + 2] = 0;
+        }
+
+        this.points.geometry.setDrawRange(0, aliveCount);
+        this.points.geometry.attributes.position.needsUpdate = true;
+        this.points.geometry.attributes.color.needsUpdate = true;
+
+        this.material.opacity = aliveCount > 0 ? 1 : 0;
+    }
 }
